@@ -1,0 +1,57 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-base: #0a0a0b;
+  --bg-soft: #15151a;
+  --bg-elevated: #1f1f26;
+  --border: #2a2a32;
+  --text: #fafafa;
+  --text-muted: #a1a1aa;
+  --accent: #22c55e;
+  --danger: #ef4444;
+}
+
+* {
+  border-color: var(--border);
+}
+
+body {
+  background-color: var(--bg-base);
+  color: var(--text);
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.card {
+  @apply rounded-xl border border-border bg-bg-soft p-5 shadow-sm;
+}
+
+.badge {
+  @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium;
+}
+
+input, select, textarea {
+  @apply bg-bg-base border border-border rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-400;
+}
+
+button {
+  @apply transition-colors;
+}
+
+.btn-primary {
+  @apply bg-accent-400 hover:bg-accent-500 text-bg-base font-medium px-4 py-2 rounded-md text-sm;
+}
+
+.btn-ghost {
+  @apply hover:bg-bg-elevated text-zinc-300 font-medium px-4 py-2 rounded-md text-sm;
+}
+
+.btn-danger {
+  @apply bg-red-500/10 hover:bg-red-500/20 text-red-300 border border-red-500/30 font-medium px-4 py-2 rounded-md text-sm;
+}
+
+label {
+  @apply block text-xs font-medium text-zinc-400 mb-1;
+}
