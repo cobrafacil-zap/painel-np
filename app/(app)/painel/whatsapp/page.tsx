@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Wifi, WifiOff, MessageCircle, AlertTriangle, Copy, Check, Save } from 'lucide-react';
+import { Wifi, WifiOff, MessageCircle, AlertTriangle, Copy, Check, Save, Webhook } from 'lucide-react';
 
 interface Group { id: string; subject: string; size: number }
 interface Status { instanceName: string; state: 'open' | 'close' | 'connecting' | 'unknown' }
@@ -15,6 +15,8 @@ export default function WhatsAppPage() {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [setupWebhookLoading, setSetupWebhookLoading] = useState(false);
+  const [webhookConfigured, setWebhookConfigured] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -70,6 +72,22 @@ export default function WhatsAppPage() {
     navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
+  }
+
+  async function setupWebhook() {
+    setSetupWebhookLoading(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/evolution/setup-webhook', { method: 'POST' });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.error ?? 'erro ao configurar');
+      setWebhookConfigured(true);
+      setError(`✅ Webhook configurado: ${j.webhook}`);
+    } catch (e: any) {
+      setError(`Webhook: ${e?.message ?? 'erro'}`);
+    } finally {
+      setSetupWebhookLoading(false);
+    }
   }
 
   return (
@@ -193,6 +211,26 @@ export default function WhatsAppPage() {
           </>
         )}
       </div>
+
+      {savedJid && (
+        <div className="card space-y-3">
+          <div>
+            <h2 className="font-semibold">Webhook</h2>
+            <p className="text-xs text-zinc-500 mt-1">
+              Configure a Evolution para entregar mensagens do seu grupo aqui.
+              Clique uma vez — fica gravado na Evolution até você mudar a URL.
+            </p>
+          </div>
+          <button
+            onClick={setupWebhook}
+            disabled={setupWebhookLoading || webhookConfigured}
+            className="btn-primary inline-flex items-center gap-2"
+          >
+            <Webhook className="w-4 h-4" />
+            {webhookConfigured ? '✅ Webhook configurado' : setupWebhookLoading ? 'Configurando…' : 'Configurar webhook agora'}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

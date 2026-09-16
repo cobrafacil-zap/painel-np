@@ -103,3 +103,4 @@ modules/financeiro/lib/     # parser IA + consultas
 - Módulo **Treino** (records com `metadata` para carga/reps/séries)
 - Módulo **Saúde** (sono, hidratação, peso)
 - Pipeline WhatsApp é genérico: cada módulo define seu próprio parser de IA.
+
