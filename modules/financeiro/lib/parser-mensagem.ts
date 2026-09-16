@@ -126,7 +126,7 @@ function getGroq() {
 export async function parseMensagem(texto: string): Promise<ParsedIntent> {
   const groq = getGroq();
   const { text } = await generateText({
-    model: groq('llama-3.3-70b-versatile'),
+    model: groq('openai/gpt-oss-120b'),
     system: SYSTEM_PROMPT,
     prompt: texto,
     temperature: 0.1,
