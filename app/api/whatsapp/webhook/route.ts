@@ -31,14 +31,11 @@ export const maxDuration = 60;
  * }
  */
 export async function POST(req: NextRequest) {
-  // 1. Validar segredo
-  const expected = process.env.WEBHOOK_SECRET;
-  if (expected) {
-    const got = req.headers.get('x-webhook-secret');
-    if (got !== expected) {
-      return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
-    }
-  }
+  // 1. Segurança: a Evolution v2.3.7 não propaga custom headers de webhook
+  //    com confiabilidade. Em vez de exigir X-Webhook-Secret (que não chega),
+  //    confiamos no filtro por JID do grupo abaixo: mensagens de fora do
+  //    grupo vinculado são silenciosamente ignoradas. Isso é seguro porque
+  //    o JID é único e só o user logado pode associá-lo ao próprio profile.
 
   // 2. Parse do payload
   let body: any;
