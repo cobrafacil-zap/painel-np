@@ -17,6 +17,10 @@ export async function GET() {
     if (e instanceof EvolutionNotConfiguredError) {
       return NextResponse.json({ error: e.message, code: 'NOT_CONFIGURED' }, { status: 501 });
     }
-    return NextResponse.json({ error: e?.message ?? 'erro' }, { status: 500 });
+    console.error('[evolution/status]', e);
+    return NextResponse.json(
+      { error: e?.message ?? 'erro', stack: e?.stack?.split('\n').slice(0, 3).join('\n') },
+      { status: 500 }
+    );
   }
 }

@@ -26,11 +26,15 @@ export default function WhatsAppPage() {
     setError(null);
     try {
       const s = await fetch('/api/evolution/status').then((r) => r.json()).catch(() => null);
-      if (s?.status) setStatus(s.status);
+      if (s?.status) {
+        setStatus(s.status);
+      } else if (s?.error) {
+        setError(`Status: ${s.error}`);
+      }
 
       const g = await fetch('/api/evolution/grupos').then((r) => r.json()).catch(() => null);
       if (g?.groups) setGroups(g.groups);
-      if (g?.error) console.warn('grupos:', g.error);
+      if (g?.error && !g?.groups) setError((prev) => prev ?? `Grupos: ${g.error}`);
 
       const me = await fetch('/api/me/whatsapp-group').then((r) => r.json()).catch(() => null);
       if (me?.whatsapp_group_jid) {
