@@ -128,6 +128,7 @@ export async function evolutionConfigurarWebhook(webhookUrl: string, secret?: st
   // Evolution permite custom header via webhookConfig; usamos para validar segredo.
   const body: Record<string, unknown> = {
     webhook: {
+      enabled: true,
       url: webhookUrl,
       webhook_by_events: false,
       webhook_base64: false,
