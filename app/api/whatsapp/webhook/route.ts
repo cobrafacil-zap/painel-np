@@ -166,13 +166,14 @@ export async function POST(req: NextRequest) {
 
   if (parsed.intent === 'compromisso') {
     const c = parsed as Extract<typeof parsed, { intent: 'compromisso' }>;
+    const dataVenc = tokenParaData(c.data_primeira);
     const result = await criarCompromisso(
       userId,
       {
         tipo: c.tipo,
         descricao: c.descricao,
         valor_total: c.valor_total,
-        data_vencimento: c.data_primeira,
+        data_vencimento: dataVenc,
         total_parcelas: c.total_parcelas,
         recorrencia: c.recorrencia,
       },
@@ -233,4 +234,31 @@ async function safeSend(destino: string, texto: string) {
   } catch (e) {
     console.error('evolution send error:', e);
   }
+}
+
+/**
+ * Converte token de data do parser em ISO date (YYYY-MM-DD).
+ * Aceita: 'HOJE', 'AMANHA', 'DIA_5' (próximo dia 5 do mês), null.
+ */
+function tokenParaData(token: string | null | undefined): string | null {
+  if (!token) return null;
+  const t = token.toUpperCase();
+  const hoje = new Date();
+  if (t === 'HOJE') return hoje.toISOString().slice(0, 10);
+  if (t === 'AMANHA') {
+    const amanha = new Date(hoje);
+    amanha.setDate(amanha.getDate() + 1);
+    return amanha.toISOString().slice(0, 10);
+  }
+  const m = t.match(/^DIA_(\d{1,2})$/);
+  if (m) {
+    const dia = parseInt(m[1], 10);
+    if (dia >= 1 && dia <= 31) {
+      const d = new Date(hoje.getFullYear(), hoje.getMonth(), dia);
+      // Se já passou esse dia no mês, joga pro próximo mês
+      if (d < hoje) d.setMonth(d.getMonth() + 1);
+      return d.toISOString().slice(0, 10);
+    }
+  }
+  return null;
 }
