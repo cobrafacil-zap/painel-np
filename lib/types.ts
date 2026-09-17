@@ -54,3 +54,37 @@ export interface Module {
   is_active: boolean;
   created_at: string;
 }
+
+export interface Compromisso {
+  id: string;
+  user_id: string;
+  module_id: string;
+  tipo: 'pagar' | 'receber';
+  descricao: string;
+  valor_total: number;
+  valor_pago: number;
+  data_vencimento: string | null; // ISO date YYYY-MM-DD ou null
+  pago: boolean;
+  pago_em: string | null;
+  observacoes: string | null;
+  source: RecordSource;
+  source_message_id: string | null;
+  total_parcelas: number;
+  parcela_atual: number;
+  recorrencia: 'unica' | 'semanal' | 'mensal' | 'anual';
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CompromissoParcela {
+  id: string;
+  compromisso_id: string;
+  user_id: string;
+  numero: number;
+  valor: number;
+  data_vencimento: string; // ISO date
+  pago: boolean;
+  pago_em: string | null;
+  created_at: string;
+  updated_at: string;
+}

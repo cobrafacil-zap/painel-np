@@ -20,17 +20,27 @@ export type ParsedIntent =
       occurred_at: string | null; // 'YYYY-MM-DD' ou null = hoje
     }
   | {
+      intent: 'compromisso';
+      confidence: number;
+      tipo: 'pagar' | 'receber';
+      descricao: string;
+      valor_total: number;
+      total_parcelas: number;
+      recorrencia: 'unica' | 'semanal' | 'mensal' | 'anual';
+      data_primeira: string | null;
+    }
+  | {
       intent: 'consulta';
       confidence: number;
-      tipo: 'gastos' | 'receitas' | 'saldo' | 'top_categoria';
+      tipo: 'gastos' | 'receitas' | 'saldo' | 'top_categoria' | 'compromissos' | 'parcelas';
       periodo: 'hoje' | 'semana' | 'mes' | 'mes_passado' | 'tudo';
       categoria: string | null;
     }
   | {
       intent: 'acao';
       confidence: number;
-      acao: 'apagar_ultimo' | 'apagar_categoria';
-      alvo: string | null; // categoria alvo ou null = mais recente
+      acao: 'apagar_ultimo' | 'apagar_categoria' | 'pagar_parcela';
+      alvo: string | null;
     }
   | {
       intent: 'outro';
@@ -64,28 +74,36 @@ FORMAS DE PAGAMENTO (devolva o slug):
 pix | cartao_credito | cartao_debito | dinheiro | boleto | transferencia
 
 INTENÇÕES:
-- "lancamento": quando o usuário REGISTRA algo novo. Ex: "gastei 50 no mercado", "recebi 1500 de freelance".
-- "consulta": quando o usuário PERGUNTA algo. Ex: "quanto gastei esse mês?", "qual meu saldo?".
-- "acao": quando o usuário quer APAGAR/REMOVER um lançamento. Ex: "apagar último", "remover o gasto do posto".
-- "outro": cumprimentos ("oi", "obrigado"), dúvidas genéricas, pedidos sem dados suficientes.
+- "lancamento": registro simples (gasto/receita). Ex: "gastei 50 no mercado".
+- "compromisso": dívida/empréstimo/conta futura. Ex: "peguei 800 com minha mãe, pagar 200/mês".
+- "consulta": pergunta sobre dados. Ex: "quanto gastei?", "o que tenho pra pagar?".
+- "acao": comando destrutivo. Ex: "apagar último", "pagar parcela 2".
+- "outro": cumprimentos, dúvidas genéricas.
 
-SAÍDA (JSON estrito, nada fora disso):
+SAÍDA (JSON estrito):
 {
-  "intent": "lancamento" | "consulta" | "acao" | "outro",
+  "intent": "lancamento" | "compromisso" | "consulta" | "acao" | "outro",
   "confidence": number 0..1,
-  // se intent=lancamento:
+  // lancamento:
   "type": "gasto" | "receita",
   "amount": number,
   "category": string | null,
   "description": string | null,
   "payment_method": string | null,
   "occurred_at": string | null,
-  // se intent=consulta:
-  "tipo": "gastos" | "receitas" | "saldo" | "top_categoria",
+  // compromisso:
+  "tipo": "pagar" | "receber",
+  "descricao": string,
+  "valor_total": number,
+  "total_parcelas": number,
+  "recorrencia": "unica" | "semanal" | "mensal" | "anual",
+  "data_primeira": string | null,
+  // consulta:
+  "tipo": "gastos" | "receitas" | "saldo" | "top_categoria" | "compromissos" | "parcelas",
   "periodo": "hoje" | "semana" | "mes" | "mes_passado" | "tudo",
   "categoria": string | null,
-  // se intent=acao:
-  "acao": "apagar_ultimo" | "apagar_categoria",
+  // acao:
+  "acao": "apagar_ultimo" | "apagar_categoria" | "pagar_parcela",
   "alvo": string | null
 }
 
@@ -136,6 +154,24 @@ EXEMPLOS:
 "apagar tudo do mercado" →
 {"intent":"acao","confidence":0.93,"acao":"apagar_categoria","alvo":"mercado"}
 
+"peguei 800 com minha mae, pagar 200 por mes" →
+{"intent":"compromisso","confidence":0.96,"tipo":"pagar","descricao":"empréstimo da mãe","valor_total":800,"total_parcelas":4,"recorrencia":"mensal","data_primeira":null}
+
+"emprestei 500 pro joao em 2x" →
+{"intent":"compromisso","confidence":0.95,"tipo":"receber","descricao":"empréstimo para joão","valor_total":500,"total_parcelas":2,"recorrencia":"mensal","data_primeira":null}
+
+"fatura do cartao 1500 vence dia 20" →
+{"intent":"compromisso","confidence":0.94,"tipo":"pagar","descricao":"fatura do cartão","valor_total":1500,"total_parcelas":1,"recorrencia":"unica","data_primeira":null}
+
+"o que tenho pra pagar?" →
+{"intent":"consulta","confidence":0.97,"tipo":"compromissos","periodo":"tudo","categoria":null}
+
+"quais minhas parcelas esse mes?" →
+{"intent":"consulta","confidence":0.95,"tipo":"parcelas","periodo":"mes","categoria":null}
+
+"paguei a parcela 2 do emprestimo da mae" →
+{"intent":"acao","confidence":0.94,"acao":"pagar_parcela","alvo":"empréstimo da mãe:2"}
+
 "oi" →
 {"intent":"outro","confidence":0.98}
 
@@ -148,6 +184,11 @@ REGRAS:
 - Se encontrar verbo financeiro (gastei/paguei/recebi/ganhei/comprei) E um valor numérico na frase, é SEMPRE "lancamento", nunca "outro".
 - "apagar", "remover", "deletar", "tirar", "excluir" + ("último" | "ultimo") → acao="apagar_ultimo".
 - "apagar"/"remover"/"deletar" + nome de categoria (mercado, posto, uber…) → acao="apagar_categoria", alvo=<slug>.
+- "peguei"/"emprestei"/"faturei"/"comprei parcelado" + valor + pessoa/algo → intent="compromisso", tipo conforme devo/recebo.
+- "em Nx", "N vezes", "N parcelas" → total_parcelas=N. Senão, 1.
+- "por mês" → recorrencia="mensal". "por semana" → "semanal". Sem dica → "mensal".
+- "o que tenho pra pagar", "minhas parcelas", "contas a pagar" → tipo="compromissos" ou "parcelas" no intent="consulta".
+- "paguei a parcela N de X" → acao="pagar_parcela", alvo="<descrição>:N".
 - "occurred_at" só preencha se o usuário disser explicitamente uma data ("ontem", "dia 5"). Para "hoje", devolva null (o sistema aplica hoje).
 - Não invente categoria se não tiver certeza — devolva null.
 - Não escreva markdown, comentários, nem nada fora do JSON.`;

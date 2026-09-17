@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { requireUser } from '@/lib/supabase/server';
 import { createClient } from '@/lib/supabase/server';
 import { LogoutButton } from './_components/logout-button';
-import { Wallet, LayoutDashboard, MessageCircle, Tags, ListChecks } from 'lucide-react';
+import { Wallet, LayoutDashboard, MessageCircle, Tags, ListChecks, ScrollText } from 'lucide-react';
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const { userId, email } = await requireUser();
@@ -32,6 +32,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         </NavLink>
         <NavSubLink href="/financeiro/lancamentos" icon={<ListChecks className="w-3.5 h-3.5" />}>
           Lançamentos
+        </NavSubLink>
+        <NavSubLink href="/financeiro/compromissos" icon={<ScrollText className="w-3.5 h-3.5" />}>
+          Compromissos
         </NavSubLink>
         <NavSubLink href="/financeiro/categorias" icon={<Tags className="w-3.5 h-3.5" />}>
           Categorias

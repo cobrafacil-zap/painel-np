@@ -1,6 +1,7 @@
 import { createServiceClient } from '@/lib/supabase/server';
 import { formatBRL, startOfMonthISO, endOfMonthISO } from '@/lib/utils';
 import type { ParsedIntent } from './parser-mensagem';
+import { resumoCompromissos, listarParcelas } from './compromissos';
 
 type Periodo = 'hoje' | 'semana' | 'mes' | 'mes_passado' | 'tudo';
 
@@ -86,5 +87,32 @@ export async function responderConsulta(userId: string, intent: Extract<ParsedIn
     return { reply: `🏆 Top categorias em ${label}:\n${top3}` };
   }
 
+  if (intent.tipo === 'compromissos') {
+    return { reply: await resumoCompromissos(userId) };
+  }
+
+  if (intent.tipo === 'parcelas') {
+    const parcelas = await listarParcelas(userId, { apenasPendentes: true, proximasDias: 90, limite: 30 });
+    if (parcelas.length === 0) {
+      return { reply: '🎉 Nenhuma parcela pendente nos próximos 90 dias.' };
+    }
+    let msg = `📅 *Suas próximas parcelas* (${parcelas.length}):\n\n`;
+    for (const p of parcelas) {
+      const c = p.compromisso!;
+      const sinal = c.tipo === 'pagar' ? '−' : '+';
+      const dias = diasAte(p.data_vencimento);
+      const labelVenc = dias < 0 ? `${Math.abs(dias)}d ATRASADO` : dias === 0 ? 'HOJE' : dias === 1 ? 'AMANHÃ' : `${dias}d`;
+      msg += `${sinal}${formatBRL(Number(p.valor))} • ${labelVenc} • ${c.descricao} (${p.numero}/${c.total_parcelas})\n`;
+    }
+    return { reply: msg };
+  }
+
   return { reply: 'Não entendi a consulta. Tente reformular.' };
+}
+
+function diasAte(dataIso: string): number {
+  const alvo = new Date(dataIso + 'T00:00:00');
+  const hoje = new Date();
+  hoje.setHours(0, 0, 0, 0);
+  return Math.round((alvo.getTime() - hoje.getTime()) / (1000 * 60 * 60 * 24));
 }

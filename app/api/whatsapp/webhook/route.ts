@@ -3,6 +3,7 @@ import { createServiceClient } from '@/lib/supabase/server';
 import { parseMensagem } from '@/modules/financeiro/lib/parser-mensagem';
 import { responderConsulta } from '@/modules/financeiro/lib/consultas';
 import { executarAcao } from '@/modules/financeiro/lib/acoes';
+import { criarCompromisso, resumoCompromissos, listarParcelas, marcarParcelaPaga } from '@/modules/financeiro/lib/compromissos';
 import { evolutionEnviarTexto } from '@/lib/evolution';
 import { formatBRL, todayISO } from '@/lib/utils';
 import type { FinanceRecord } from '@/lib/types';
@@ -163,8 +164,61 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, intent: 'consulta' });
   }
 
+  if (parsed.intent === 'compromisso') {
+    const c = parsed as Extract<typeof parsed, { intent: 'compromisso' }>;
+    const result = await criarCompromisso(
+      userId,
+      {
+        tipo: c.tipo,
+        descricao: c.descricao,
+        valor_total: c.valor_total,
+        data_vencimento: c.data_primeira,
+        total_parcelas: c.total_parcelas,
+        recorrencia: c.recorrencia,
+      },
+      messageId
+    );
+    await safeSend(remoteJid, result.reply);
+    return NextResponse.json({ ok: true, intent: 'compromisso', id: result.id });
+  }
+
   if (parsed.intent === 'acao') {
     const a = parsed as Extract<typeof parsed, { intent: 'acao' }>;
+
+    // "pagar_parcela" tem tratamento especial (não passa pelo acoes.ts)
+    if (a.acao === 'pagar_parcela' && a.alvo) {
+      const [desc, numStr] = a.alvo.split(':');
+      const num = parseInt(numStr ?? '1', 10);
+      const supabase = createServiceClient();
+      // Encontra a parcela pela descrição + número
+      const { data: comp } = await supabase
+        .from('compromissos')
+        .select('id')
+        .eq('user_id', userId)
+        .ilike('descricao', `%${desc}%`)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (!comp) {
+        await safeSend(remoteJid, `🤷 Não achei compromisso com "${desc}".`);
+        return NextResponse.json({ ok: true, intent: 'acao' });
+      }
+      const { data: parc } = await supabase
+        .from('compromisso_parcelas')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('compromisso_id', comp.id)
+        .eq('numero', num)
+        .maybeSingle();
+      if (!parc) {
+        await safeSend(remoteJid, `🤷 Parcela ${num} não encontrada.`);
+        return NextResponse.json({ ok: true, intent: 'acao' });
+      }
+      const result = await marcarParcelaPaga(parc.id, userId);
+      await safeSend(remoteJid, result.reply);
+      return NextResponse.json({ ok: true, intent: 'acao' });
+    }
+
     const result = await executarAcao(userId, a.acao, a.alvo);
     await safeSend(remoteJid, result.reply);
     return NextResponse.json({ ok: true, intent: 'acao', deleted: result.deleted ?? 0 });
