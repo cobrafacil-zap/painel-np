@@ -6,9 +6,10 @@ import { evolutionEnviarTexto } from '@/lib/evolution';
 import { formatBRL, todayISO } from '@/lib/utils';
 import type { FinanceRecord } from '@/lib/types';
 
-// Fluid Compute: reutiliza instância entre requests, evita cold start.
-// Sem await no handler principal — manda tudo em paralelo e retorna 200
-// IMEDIATAMENTE. A Evolution tem fila interna; o WhatsApp entrega em segundos.
+// Fluid Compute: roda em São Paulo (gru1), perto do Contabo.
+// Processamento paralelo: ack visual sai em paralelo com parse IA,
+// confirmação detalhada sai em paralelo com insert. Tempo total ≈
+// max(Groq, Supabase, Evolution) em vez da soma.
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 export const runtime = 'nodejs';
@@ -17,30 +18,21 @@ export const runtime = 'nodejs';
  * POST /api/whatsapp/webhook
  *
  * Recebe mensagens da Evolution API (evento MESSAGES_UPSERT).
- * Filtra por JID do grupo vinculado (silencioso se não bate).
- * Processa parser + inserção + resposta em paralelo, sem bloquear o ack.
+ * Filtra por JID do grupo vinculado.
  *
- * Otimizações de latência (era 1-4 min, alvo: < 10s):
- * 1. Retorna 200 imediatamente (Evolution não reentrega)
- * 2. Manda "⏳ processando..." em paralelo com o parse IA
- * 3. Envia confirmação detalhada em paralelo com o insert
- * 4. Sem awaits sequenciais entre Groq → Supabase → Evolution
+ * OTIMIZAÇÕES (era 1-4min → alvo <10s):
+ * 1. ack visual "⏳" sai em paralelo com o parse IA (Groq é o gargalo)
+ * 2. confirmação "✅" sai em paralelo com o insert no Supabase
+ * 3. tudo dentro de um único await chain, sem fire-and-forget
+ *    (Fluid Compute mata background promises depois do response)
  */
 export async function POST(req: NextRequest) {
-  // Não aguardamos o body inteiro — pegamos o essencial e soltamos o 200.
-  // O Evolution espera 200 rápido; sem isso ele reentrega e gera duplicatas.
-  handleWebhook(req).catch((err) => {
-    console.error('webhook handler crashed:', err);
-  });
-  return NextResponse.json({ ok: true, queued: true });
-}
-
-async function handleWebhook(req: NextRequest) {
+  // 1. Parse do payload
   let body: any;
   try {
     body = await req.json();
   } catch {
-    return;
+    return NextResponse.json({ error: 'invalid json' }, { status: 400 });
   }
 
   const event = body?.event;
@@ -49,23 +41,23 @@ async function handleWebhook(req: NextRequest) {
   const key = data?.key;
 
   // Só processa mensagens recebidas (não eco)
-  if (event !== 'messages.upsert') return;
-  if (!message) return;
-  if (key?.fromMe) return;
+  if (event !== 'messages.upsert') return NextResponse.json({ ok: true, skipped: true });
+  if (!message) return NextResponse.json({ ok: true, skipped: true });
+  if (key?.fromMe) return NextResponse.json({ ok: true, skipped: true });
 
-  // Texto da mensagem (suporta conversation, extendedTextMessage.text)
   const texto: string =
     message?.conversation ||
     message?.extendedTextMessage?.text ||
     message?.buttonsResponseMessage?.selectedDisplayText ||
     '';
-
   const remoteJid: string = key?.remoteJid || '';
   const messageId: string = key?.id || '';
 
-  if (!texto || !remoteJid) return;
+  if (!texto || !remoteJid) {
+    return NextResponse.json({ ok: true, skipped: true });
+  }
 
-  // Identificar user pelo JID do grupo
+  // 2. Identificar user pelo JID do grupo
   const supabase = createServiceClient();
   const { data: profile } = await supabase
     .from('profiles')
@@ -73,15 +65,14 @@ async function handleWebhook(req: NextRequest) {
     .eq('whatsapp_group_jid', remoteJid)
     .maybeSingle();
 
-  if (!profile) return; // mensagem de outro grupo, ignora
+  if (!profile) return NextResponse.json({ ok: true, skipped: 'unlinked_group' });
   const userId = profile.id;
 
-  // Parse IA + ack visual em paralelo.
-  // O "⏳" chega antes do parse terminar (Groq é o gargalo).
-  const ackPromise = safeSend(
-    remoteJid,
-    `⏳ Anotando…`
-  );
+  // 3. ACK VISUAL em paralelo com parse IA.
+  // O ack sai imediatamente (Evolution tem fila interna, entrega em ms),
+  // o parser roda em paralelo. Quando o parser terminar, mandamos a
+  // confirmação detalhada.
+  const ackPromise = safeSend(remoteJid, `⏳ Anotando…`);
 
   let parsed;
   try {
@@ -93,41 +84,56 @@ async function handleWebhook(req: NextRequest) {
     ]);
   } catch (e: any) {
     console.error('parser error:', e);
-    await ackPromise; // garante que "⏳" saiu antes do erro
+    await ackPromise;
     await safeSend(remoteJid, '⚠️ Erro ao interpretar. Tente reformular.');
-    return;
+    return NextResponse.json({ ok: true, error: 'parser' });
   }
 
+  // Garante que o "⏳" saiu antes da confirmação
   await ackPromise;
 
-  // Roteamento por intent
+  // 4. Roteamento por intent
   if (parsed.intent === 'outro' || parsed.confidence < 0.6) {
     await safeSend(
       remoteJid,
       '🤔 Não entendi. Pode reformular?\n\nExemplos:\n• "gastei 50 no mercado"\n• "recebi 1500 de freelance"\n• "quanto gastei esse mês?"'
     );
-    return;
+    return NextResponse.json({ ok: true, intent: 'outro' });
   }
 
   if (parsed.intent === 'lancamento') {
     const p = parsed as Extract<typeof parsed, { intent: 'lancamento' }>;
-    const { data: inserted, error } = await supabase
-      .from('records')
-      .insert({
-        user_id: userId,
-        module_id: 'financeiro',
-        type: p.type,
-        amount: p.amount,
-        category: p.category,
-        description: p.description,
-        payment_method: p.payment_method,
-        occurred_at: p.occurred_at ?? todayISO(),
-        source: 'whatsapp',
-        source_message_id: messageId,
-        metadata: { remote_jid: remoteJid, parsed_confidence: p.confidence },
-      })
-      .select()
-      .single();
+
+    // Pre-monta a string de confirmação (sem await, é puro)
+    const sinal = p.type === 'gasto' ? '−' : '+';
+    const tipoLabel = p.type === 'gasto' ? 'Gasto' : 'Receita';
+    const catLabel = p.category ? ` em '${p.category}'` : '';
+    const confirmacao = `✅ ${tipoLabel} de ${sinal}${formatBRL(p.amount)}${catLabel} registrado.`;
+
+    // INSERT e ENVIO em paralelo: o usuário recebe a confirmação junto com
+    // (ou logo após) o commit no banco. Sem serializar.
+    const [insertResult] = await Promise.all([
+      supabase
+        .from('records')
+        .insert({
+          user_id: userId,
+          module_id: 'financeiro',
+          type: p.type,
+          amount: p.amount,
+          category: p.category,
+          description: p.description,
+          payment_method: p.payment_method,
+          occurred_at: p.occurred_at ?? todayISO(),
+          source: 'whatsapp',
+          source_message_id: messageId,
+          metadata: { remote_jid: remoteJid, parsed_confidence: p.confidence },
+        })
+        .select()
+        .single(),
+      safeSend(remoteJid, confirmacao),
+    ]);
+
+    const { data: inserted, error } = insertResult;
 
     if (error || !inserted) {
       const isDupe =
@@ -137,24 +143,19 @@ async function handleWebhook(req: NextRequest) {
         ? `ℹ️ Essa mensagem já tinha sido registrada antes.`
         : `⚠️ Erro ao salvar: ${error?.message ?? 'desconhecido'}`;
       await safeSend(remoteJid, reply);
-      return;
+      return NextResponse.json({ ok: true, error: isDupe ? 'duplicate' : 'db' });
     }
 
-    const sinal = p.type === 'gasto' ? '−' : '+';
-    const tipoLabel = p.type === 'gasto' ? 'Gasto' : 'Receita';
-    const catLabel = p.category ? ` em '${p.category}'` : '';
-    await safeSend(
-      remoteJid,
-      `✅ ${tipoLabel} de ${sinal}${formatBRL(p.amount)}${catLabel} registrado.`
-    );
-    return;
+    return NextResponse.json({ ok: true, intent: 'lancamento', id: (inserted as FinanceRecord).id });
   }
 
   if (parsed.intent === 'consulta') {
     const result = await responderConsulta(userId, parsed);
     await safeSend(remoteJid, result.reply);
-    return;
+    return NextResponse.json({ ok: true, intent: 'consulta' });
   }
+
+  return NextResponse.json({ ok: true, skipped: true });
 }
 
 async function safeSend(destino: string, texto: string) {
