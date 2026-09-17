@@ -143,7 +143,18 @@ export async function evolutionCriarInstancia(instanceName: string): Promise<{ i
   const res = await fetch(`${cfg.baseUrl}/instance/create`, {
     method: "POST",
     headers: { apikey: cfg.apiKey, "Content-Type": "application/json" },
-    body: JSON.stringify({ instanceName, qrcode: true }),
+    body: JSON.stringify({
+      instanceName,
+      qrcode: true,
+      integration: "WHATSAPP-BAILEYS",
+      // Evita o painel bug de "já existe" em retries
+      reject_call: false,
+      groups_ignore: true,
+      always_online: false,
+      read_messages: false,
+      read_status: false,
+      sync_full_history: false,
+    }),
     cache: "no-store",
     signal: AbortSignal.timeout(60_000),
   });
