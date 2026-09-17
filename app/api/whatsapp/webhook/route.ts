@@ -127,10 +127,29 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, skipped: true });
   }
 
-  // NOTA: em grupo só-com-você (como "Finanças"), todas as mensagens têm
-  // fromMe=true porque o único humano É você. NÃO filtramos by fromMe aqui.
-  // Se a Evolution entregar mensagens de outros humanos no futuro, ajustar
-  // comparando o `participant` contra o JID do dono do profile.
+  // Loop guard: se o texto é uma das nossas próprias respostas (acks/erros
+  // que o bot mandou pro grupo), ignora. Sem isso, o bot lê a própria
+  // resposta como input, falha no parser, manda "Erro ao interpretar",
+  // que vira input de novo → loop infinito. Esse padrão é único o suficiente
+  // pra ser seguro como filtro.
+  const isOwnBotReply =
+    texto.startsWith('⏳') ||
+    texto.startsWith('🎙️') ||
+    texto.startsWith('✅') ||
+    texto.startsWith('⚠️') ||
+    texto.startsWith('🤔') ||
+    texto.startsWith('ℹ️') ||
+    texto.startsWith('🤷');
+  if (isOwnBotReply) {
+    return NextResponse.json({ ok: true, skipped: 'own_reply' });
+  }
+
+  // Em grupo só-com-você (como "Finanças"), todas as mensagens do dono
+  // chegam com fromMe=true. Em conversa privada 1:1, mensagens que o
+  // próprio número manda (eco do app) também chegam com fromMe=true.
+  // Filtramos em qualquer caso onde fromMe=true E não é grupo (porque em
+  // grupo, a Evolution repassa mensagens do bot como "fromMe=false" do
+  // participant — o loop guard acima já cobre esse caso).
   if (key?.fromMe && !remoteJid.endsWith('@g.us')) {
     return NextResponse.json({ ok: true, skipped: true });
   }
