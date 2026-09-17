@@ -39,7 +39,7 @@ export type ParsedIntent =
   | {
       intent: 'acao';
       confidence: number;
-      acao: 'apagar_ultimo' | 'apagar_categoria' | 'pagar_parcela';
+      acao: 'apagar_ultimo' | 'apagar_categoria' | 'pagar_parcela' | 'pagar_conta';
       alvo: string | null;
     }
   | {
@@ -329,6 +329,20 @@ function tentarParseLocal(texto: string): ParsedIntent | null {
     return { intent: 'acao', confidence: 0.93, acao: 'pagar_parcela', alvo: `${parcMatch[2].trim()}:${parcMatch[1]}` };
   }
 
+  // === Paguei a conta de X (marca compromisso pendente como pago) ===
+  // "paguei a conta de luz" / "paguei o boleto da internet" / "paguei conta de água"
+  // Diferente de "paguei conta de luz 200" (que é gasto realizado).
+  // Se NÃO tem valor, é marcar como paga; se TEM valor, é gasto realizado.
+  const pagueiContaMatch = tl.match(/^paguei\s+(?:a|o)?\s*(?:conta|boleto|fatura)\s+(?:de|do|da)\s+([\wáàãâéêíóôõúüç]+)$/i);
+  if (pagueiContaMatch && !/\d/.test(t)) {
+    return { intent: 'acao', confidence: 0.93, acao: 'pagar_conta', alvo: pagueiContaMatch[1] };
+  }
+  const pagueiContaCurtoMatch = tl.match(/^paguei\s+(?:a|o)\s+([\wáàãâéêíóôõúüç]+)$/i);
+  if (pagueiContaCurtoMatch && !/\d/.test(t)) {
+    // "paguei a luz" / "paguei o aluguel" — pagamento simples sem valor
+    return { intent: 'acao', confidence: 0.88, acao: 'pagar_conta', alvo: pagueiContaCurtoMatch[1] };
+  }
+
   // === Consultas curtas ===
   if (/^(o\s+que|quais?|quanto|qual|me\s+mostra|me\s+diz)\b/.test(tl)) {
     if (/pra\s+pagar|para\s+pagar|tenho\s+que\s+pagar|contas\s+a\s+pagar|devo\b/.test(tl)) {
@@ -476,13 +490,57 @@ function tentarParseLocal(texto: string): ParsedIntent | null {
   // "tenho uma conta de X de N" / "X tá N" / "X custa N" / "pago N de X" não têm
   // verbo financeiro direto mas SÃO gastos recorrentes (conta de internet,
   // academia, aluguel). Reconhecemos esses padrões com `temVerboGasto` ampliado.
+  const temVerboGastoRealizado =
+    /\b(gastei|gastar|comprei|comprar|sac[ou]ei|debit[ou]|custei|despesa|sa[ií]da|foi\s+pago)\b/i.test(t);
+  const temVerboPagar = /\b(paguei|pagar|pago)\b/i.test(t);
   const temVerboGasto =
-    /\b(gastei|gastar|paguei|pagar|comprei|comprar|sac[ou]ei|debit[ou]|custei|despesa|sa[ií]da)\b/i.test(t) ||
-    // Frases sem verbo: "tenho uma conta de X de R$ N", "pago N de X", "X custa N"
-    /\b(tenho\s+(?:uma|1|uma\s+conta)|pago\s+(?:r\$\s*)?\d|custa\s+(?:r\$\s*)?\d|t[áa]\s+(?:r\$\s*)?\d|saiu\s+(?:r\$\s*)?\d|é\s+(?:r\$\s*)?\d|foi\s+(?:r\$\s*)?\d)\b/i.test(t);
+    temVerboGastoRealizado ||
+    temVerboPagar ||
+    // Frases sem verbo: "tenho uma conta de X de R$ N", "custa N", "X tá N"
+    /\b(tenho\s+(?:uma|1|uma\s+conta|conta)|custa\s+(?:r\$\s*)?\d|t[áa]\s+(?:r\$\s*)?\d|saiu\s+(?:r\$\s*)?\d|é\s+(?:r\$\s*)?\d|foi\s+(?:r\$\s*)?\d)\b/i.test(t);
   const temVerboReceita = /\b(recebi|receber|ganhei|ganhar|entrou|caiu|depositou|sal[áa]rio|freelance|cliente|entrada)\b/i.test(t);
 
   if (!temVerboGasto && !temVerboReceita) return null;
+
+  // === HEURÍSTICA: compromisso pendente (não gasto realizado) ===
+  // Frases tipo "tenho conta de X de N" / "tenho que pagar X" / "boleto de X
+  // de N" / "X vence dia Y" são contas AINDA NÃO PAGAS — viram compromisso
+  // (parcela 1, pendente). Quando o usuário falar "paguei X" depois, o bot
+  // marca esse compromisso como pago.
+  // Marcadores de pendência: "tenho que pagar", "conta de", "boleto de",
+  // "fatura de", "vence dia", "a pagar".
+  const ehPendencia =
+    /\b(tenho\s+(?:uma\s+)?conta|tenho\s+que\s+pagar|a\s+pagar|conta\s+de|boleto\s+de|fatura\s+(?:de|do|da)|vence|vence\s+dia|vencer)\b/i.test(t) &&
+    !temVerboGastoRealizado;
+
+  if (ehPendencia) {
+    // Extrai a descrição (ex: "luz", "internet", "aluguel")
+    let descricao = '';
+    const contaMatch = t.match(/\bconta\s+de\s+([\wáàãâéêíóôõúüç]+)/i);
+    const boletoMatch = t.match(/\bboleto\s+(?:de|do|da)\s+([\wáàãâéêíóôõúüç]+)/i);
+    const faturaMatch = t.match(/\bfatura\s+(?:de|do|da)\s+([\wáàãâéêíóôõúüç]+)/i);
+    const genericoMatch = t.match(/\b(?:de|do|da)\s+([\wáàãâéêíóôõúüç]{3,})/i);
+    if (contaMatch) descricao = contaMatch[1];
+    else if (boletoMatch) descricao = boletoMatch[1];
+    else if (faturaMatch) descricao = faturaMatch[1];
+    else if (genericoMatch) descricao = genericoMatch[1];
+
+    // Data de vencimento: "vence dia 5" → DIA_5 (default = próximo mês dia 5)
+    let data_vencimento: string | null = null;
+    const venceMatch = t.match(/\bvence\s+(?:dia\s+)?(\d{1,2})\b/i);
+    if (venceMatch) data_vencimento = `DIA_${parseInt(venceMatch[1], 10)}`;
+
+    return {
+      intent: 'compromisso',
+      confidence: 0.92,
+      tipo: 'pagar',
+      descricao: descricao || 'conta',
+      valor_total: valor,
+      total_parcelas: 1,
+      recorrencia: 'unica',
+      data_primeira: data_vencimento,
+    };
+  }
 
   const tipo: 'gasto' | 'receita' = temVerboReceita && !temVerboGasto ? 'receita' : 'gasto';
 

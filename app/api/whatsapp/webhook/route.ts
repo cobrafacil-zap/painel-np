@@ -344,6 +344,55 @@ export async function POST(req: NextRequest) {
   if (parsed.intent === 'acao') {
     const a = parsed as Extract<typeof parsed, { intent: 'acao' }>;
 
+    // "pagar_conta" tem tratamento especial (não passa pelo acoes.ts): busca
+    // o compromisso pendente (parcela 1, não paga) que case com a descrição
+    // (ex: "luz") e marca como pago. Diferente de pagar_parcela, que
+    // exige número explícito ("parcela 2 da mãe").
+    if (a.acao === 'pagar_conta' && a.alvo) {
+      const supabase = createServiceClient();
+      // Procura o compromisso mais recente que case com a descrição e tenha
+      // pelo menos uma parcela pendente. Ordena por created_at desc pra
+      // pegar o mais recente.
+      const { data: comp } = await supabase
+        .from('compromissos')
+        .select('id, descricao, valor_total')
+        .eq('user_id', userId)
+        .eq('tipo', 'pagar')
+        .ilike('descricao', `%${a.alvo}%`)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (!comp) {
+        await safeSend(
+          remoteJid,
+          `🤷 Não achei compromisso pendente com "${a.alvo}". Crie um antes com "tenho conta de ${a.alvo} N reais".`,
+          instanceFromPayload,
+        );
+        return NextResponse.json({ ok: true, intent: 'acao' });
+      }
+      // Pega a primeira parcela pendente (menor numero sem data_pagamento)
+      const { data: parc } = await supabase
+        .from('compromisso_parcelas')
+        .select('id, numero')
+        .eq('user_id', userId)
+        .eq('compromisso_id', comp.id)
+        .is('data_pagamento', null)
+        .order('numero', { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      if (!parc) {
+        await safeSend(
+          remoteJid,
+          `✅ A conta de ${comp.descricao} já está toda paga.`,
+          instanceFromPayload,
+        );
+        return NextResponse.json({ ok: true, intent: 'acao' });
+      }
+      const result = await marcarParcelaPaga(parc.id, userId);
+      await safeSend(remoteJid, result.reply, instanceFromPayload);
+      return NextResponse.json({ ok: true, intent: 'acao' });
+    }
+
     // "pagar_parcela" tem tratamento especial (não passa pelo acoes.ts)
     if (a.acao === 'pagar_parcela' && a.alvo) {
       const [desc, numStr] = a.alvo.split(':');
