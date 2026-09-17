@@ -44,7 +44,6 @@ export async function POST(req: NextRequest) {
   // Só processa mensagens recebidas (não eco)
   if (event !== 'messages.upsert') return NextResponse.json({ ok: true, skipped: true });
   if (!message) return NextResponse.json({ ok: true, skipped: true });
-  if (key?.fromMe) return NextResponse.json({ ok: true, skipped: true });
 
   const texto: string =
     message?.conversation ||
@@ -55,6 +54,14 @@ export async function POST(req: NextRequest) {
   const messageId: string = key?.id || '';
 
   if (!texto || !remoteJid) {
+    return NextResponse.json({ ok: true, skipped: true });
+  }
+
+  // NOTA: em grupo só-com-você (como "Finanças"), todas as mensagens têm
+  // fromMe=true porque o único humano É você. NÃO filtramos by fromMe aqui.
+  // Se a Evolution entregar mensagens de outros humanos no futuro, ajustar
+  // comparando o `participant` contra o JID do dono do profile.
+  if (key?.fromMe && !remoteJid.endsWith('@g.us')) {
     return NextResponse.json({ ok: true, skipped: true });
   }
 
