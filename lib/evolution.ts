@@ -1,17 +1,22 @@
 /**
  * Cliente para Evolution API (WhatsApp não-oficial, self-hosted).
  *
- * Reaproveitado do PAINEL GL. Diferenças:
- * - O nome da instância é fixo em EVOLUTION_INSTANCE (uma instância por app).
- * - Mantém as funções de envio de texto e imagem.
- * - Adiciona `evolutionEnviarTextoPorNumero()` para enviar para o número pessoal,
- *   usado pelo webhook como resposta.
+ * Multi-tenant: cada chamada aceita `instanceName` opcional. Se omitido,
+ * usa o default `EVOLUTION_INSTANCE` da env (backward compat pro Nicolas).
+ *
+ * Funções que aceitam instanceName:
+ *  - evolutionInstanceStatus(instanceName?)
+ *  - evolutionQRCode(instanceName?)
+ *  - evolutionEnviarTexto(destino, texto, delayMs?, timeoutMs?, instanceName?)
+ *  - evolutionCriarInstancia(instanceName)   ← sempre explícito
+ *  - evolutionConfigurarWebhook(instanceName, webhookUrl, secret?)
+ *  - evolutionListarGrupos(instanceName?)
  */
 
 export class EvolutionNotConfiguredError extends Error {
-  constructor() {
+  constructor(missing: string[] = ["EVOLUTION_API_URL", "EVOLUTION_API_KEY", "EVOLUTION_INSTANCE"]) {
     super(
-      "Evolution API não configurada. Defina EVOLUTION_API_URL, EVOLUTION_API_KEY e EVOLUTION_INSTANCE nas variáveis de ambiente."
+      `Evolution API não configurada. Defina ${missing.join(", ")} nas variáveis de ambiente.`
     );
     this.name = "EvolutionNotConfiguredError";
   }
@@ -22,14 +27,38 @@ function lerEnv(nome: string): string | null {
   return v && v.trim() ? v.trim() : null;
 }
 
-export function evolutionConfig() {
+/**
+ * Configuração global (URL + API key). Não inclui instance — agora é
+ * resolvido por chamada.
+ */
+export function evolutionGlobalConfig() {
   const baseUrl = lerEnv("EVOLUTION_API_URL");
   const apiKey = lerEnv("EVOLUTION_API_KEY");
+  const missing: string[] = [];
+  if (!baseUrl) missing.push("EVOLUTION_API_URL");
+  if (!apiKey) missing.push("EVOLUTION_API_KEY");
+  if (missing.length > 0) throw new EvolutionNotConfiguredError(missing);
+  return { baseUrl: baseUrl!, apiKey: apiKey! };
+}
+
+/**
+ * DEPRECADO: use `evolutionGlobalConfig()` + passe `instanceName` por chamada.
+ * Mantido para compatibilidade — retorna `{baseUrl, apiKey, instance}` onde
+ * `instance` vem de EVOLUTION_INSTANCE.
+ */
+export function evolutionConfig() {
+  const global = evolutionGlobalConfig();
   const instance = lerEnv("EVOLUTION_INSTANCE");
-  if (!baseUrl || !apiKey || !instance) {
-    throw new EvolutionNotConfiguredError();
-  }
-  return { baseUrl, apiKey, instance };
+  if (!instance) throw new EvolutionNotConfiguredError(["EVOLUTION_INSTANCE"]);
+  return { ...global, instance };
+}
+
+/** Resolve o nome da instância a usar: parâmetro explícito ou env default. */
+function resolveInstance(instanceName?: string): string {
+  if (instanceName && instanceName.trim()) return instanceName.trim();
+  const env = lerEnv("EVOLUTION_INSTANCE");
+  if (!env) throw new EvolutionNotConfiguredError(["EVOLUTION_INSTANCE"]);
+  return env;
 }
 
 export type EvolutionInstanceState = "open" | "close" | "connecting" | "unknown";
@@ -39,10 +68,13 @@ export interface EvolutionInstanceStatus {
   state: EvolutionInstanceState;
 }
 
-export async function evolutionInstanceStatus(): Promise<EvolutionInstanceStatus> {
-  const cfg = evolutionConfig();
+export async function evolutionInstanceStatus(
+  instanceName?: string
+): Promise<EvolutionInstanceStatus> {
+  const cfg = evolutionGlobalConfig();
+  const inst = resolveInstance(instanceName);
   const res = await fetch(
-    `${cfg.baseUrl}/instance/connectionState/${cfg.instance}`,
+    `${cfg.baseUrl}/instance/connectionState/${inst}`,
     {
       headers: { apikey: cfg.apiKey },
       cache: "no-store",
@@ -52,15 +84,16 @@ export async function evolutionInstanceStatus(): Promise<EvolutionInstanceStatus
   if (!res.ok) throw new Error(`Evolution status HTTP ${res.status}`);
   const json = (await res.json()) as { instance?: { instanceName?: string; state?: EvolutionInstanceState } };
   return {
-    instanceName: json.instance?.instanceName ?? cfg.instance,
+    instanceName: json.instance?.instanceName ?? inst,
     state: json.instance?.state ?? "unknown",
   };
 }
 
-export async function evolutionQRCode(): Promise<string | null> {
-  const cfg = evolutionConfig();
+export async function evolutionQRCode(instanceName?: string): Promise<string | null> {
+  const cfg = evolutionGlobalConfig();
+  const inst = resolveInstance(instanceName);
   const res = await fetch(
-    `${cfg.baseUrl}/instance/connect/${cfg.instance}`,
+    `${cfg.baseUrl}/instance/connect/${inst}`,
     {
       headers: { apikey: cfg.apiKey },
       cache: "no-store",
@@ -79,11 +112,13 @@ export async function evolutionEnviarTexto(
   destino: string,
   texto: string,
   delayMs = 0,
-  timeoutMs = 45_000
+  timeoutMs = 45_000,
+  instanceName?: string
 ): Promise<{ id: string; timestamp: number }> {
-  const cfg = evolutionConfig();
+  const cfg = evolutionGlobalConfig();
+  const inst = resolveInstance(instanceName);
   const res = await fetch(
-    `${cfg.baseUrl}/message/sendText/${cfg.instance}`,
+    `${cfg.baseUrl}/message/sendText/${inst}`,
     {
       method: "POST",
       headers: { apikey: cfg.apiKey, "Content-Type": "application/json" },
@@ -104,7 +139,7 @@ export async function evolutionEnviarTexto(
 }
 
 export async function evolutionCriarInstancia(instanceName: string): Promise<{ instanceName: string }> {
-  const cfg = evolutionConfig();
+  const cfg = evolutionGlobalConfig();
   const res = await fetch(`${cfg.baseUrl}/instance/create`, {
     method: "POST",
     headers: { apikey: cfg.apiKey, "Content-Type": "application/json" },
@@ -120,13 +155,16 @@ export async function evolutionCriarInstancia(instanceName: string): Promise<{ i
   return { instanceName: json.instance?.instanceName ?? instanceName };
 }
 
-export async function evolutionConfigurarWebhook(webhookUrl: string, secret?: string): Promise<void> {
-  const cfg = evolutionConfig();
+export async function evolutionConfigurarWebhook(
+  instanceName: string,
+  webhookUrl: string,
+  secret?: string
+): Promise<void> {
+  const cfg = evolutionGlobalConfig();
   const headers: Record<string, string> = {
     apikey: cfg.apiKey,
     "Content-Type": "application/json",
   };
-  // Evolution permite custom header via webhookConfig; usamos para validar segredo.
   const body: Record<string, unknown> = {
     webhook: {
       enabled: true,
@@ -141,7 +179,7 @@ export async function evolutionConfigurarWebhook(webhookUrl: string, secret?: st
       { name: "X-Webhook-Secret", value: secret },
     ];
   }
-  const res = await fetch(`${cfg.baseUrl}/webhook/set/${cfg.instance}`, {
+  const res = await fetch(`${cfg.baseUrl}/webhook/set/${instanceName}`, {
     method: "POST",
     headers,
     body: JSON.stringify(body),
@@ -154,6 +192,36 @@ export async function evolutionConfigurarWebhook(webhookUrl: string, secret?: st
   }
 }
 
+export async function evolutionLogout(instanceName?: string): Promise<void> {
+  const cfg = evolutionGlobalConfig();
+  const inst = resolveInstance(instanceName);
+  const res = await fetch(`${cfg.baseUrl}/instance/logout/${inst}`, {
+    method: "DELETE",
+    headers: { apikey: cfg.apiKey },
+    cache: "no-store",
+    signal: AbortSignal.timeout(60_000),
+  });
+  if (!res.ok && res.status !== 404) {
+    const b = await res.text().catch(() => "");
+    throw new Error(`Evolution logout HTTP ${res.status}: ${b}`);
+  }
+}
+
+export async function evolutionDeleteInstance(instanceName?: string): Promise<void> {
+  const cfg = evolutionGlobalConfig();
+  const inst = resolveInstance(instanceName);
+  const res = await fetch(`${cfg.baseUrl}/instance/delete/${inst}`, {
+    method: "DELETE",
+    headers: { apikey: cfg.apiKey },
+    cache: "no-store",
+    signal: AbortSignal.timeout(60_000),
+  });
+  if (!res.ok && res.status !== 404) {
+    const b = await res.text().catch(() => "");
+    throw new Error(`Evolution delete HTTP ${res.status}: ${b}`);
+  }
+}
+
 export interface EvolutionGroup {
   id: string;
   subject: string;
@@ -163,10 +231,11 @@ export interface EvolutionGroup {
 /**
  * Lista os grupos do WhatsApp que a Evolution conhece.
  */
-export async function evolutionListarGrupos(): Promise<EvolutionGroup[]> {
-  const cfg = evolutionConfig();
+export async function evolutionListarGrupos(instanceName?: string): Promise<EvolutionGroup[]> {
+  const cfg = evolutionGlobalConfig();
+  const inst = resolveInstance(instanceName);
   const res = await fetch(
-    `${cfg.baseUrl}/group/fetchAllGroups/${cfg.instance}?getParticipants=false`,
+    `${cfg.baseUrl}/group/fetchAllGroups/${inst}?getParticipants=false`,
     {
       headers: { apikey: cfg.apiKey },
       cache: "no-store",

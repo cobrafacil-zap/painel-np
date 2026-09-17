@@ -1,6 +1,7 @@
 import Link from 'next/link';
-import { requireUser } from '@/lib/supabase/server';
-import { createClient } from '@/lib/supabase/server';
+import { headers } from 'next/headers';
+import { redirect } from 'next/navigation';
+import { requireUser, createClient } from '@/lib/supabase/server';
 import { LogoutButton } from './_components/logout-button';
 import { Wallet, LayoutDashboard, MessageCircle, Tags, ListChecks, ScrollText } from 'lucide-react';
 
@@ -9,9 +10,19 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const supabase = await createClient();
   const { data: profile } = await supabase
     .from('profiles')
-    .select('full_name')
+    .select('full_name, evolution_instance_name, evolution_status')
     .eq('id', userId)
     .single();
+
+  // Onboarding: usuário sem instância Evolution vai pra /onboarding/whatsapp.
+  // Mas não redireciona se já está lá (evita loop).
+  const hdrs = await headers();
+  const pathname = hdrs.get('x-invoke-path') ?? hdrs.get('next-url') ?? hdrs.get('x-pathname') ?? '';
+  const isOnOnboarding = pathname.includes('/onboarding');
+
+  if (!profile?.evolution_instance_name && !isOnOnboarding) {
+    redirect('/onboarding/whatsapp');
+  }
 
   return (
     <div className="min-h-screen flex">
@@ -21,6 +32,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <p className="text-xs text-zinc-500 mt-0.5 truncate">
             {profile?.full_name || email}
           </p>
+          {profile?.evolution_instance_name && (
+            <p className="text-[10px] text-zinc-600 mt-0.5 truncate" title={profile.evolution_instance_name}>
+              📱 {profile.evolution_instance_name}
+            </p>
+          )}
         </div>
 
         <NavLink href="/painel" icon={<LayoutDashboard className="w-4 h-4" />}>

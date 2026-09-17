@@ -29,6 +29,18 @@ export const runtime = 'nodejs';
  *    (Fluid Compute mata background promises depois do response)
  */
 export async function POST(req: NextRequest) {
+  // 0. Validar X-Webhook-Secret (configurado em cada instância Evolution
+  // durante o provisionamento). Se WEBHOOK_SECRET não estiver na env,
+  // aceita tudo (modo dev).
+  const expectedSecret = process.env.WEBHOOK_SECRET;
+  if (expectedSecret) {
+    const got = req.headers.get('x-webhook-secret');
+    if (got !== expectedSecret) {
+      console.warn('[webhook] secret inválido (got=%s)', got ? 'present' : 'missing');
+      return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
+    }
+  }
+
   // 1. Parse do payload
   let body: any;
   try {
@@ -54,6 +66,15 @@ export async function POST(req: NextRequest) {
   const remoteJid: string = key?.remoteJid || '';
   const messageId: string = key?.id || '';
 
+  // Nome da instância Evolution que originou o evento. Pode vir em
+  // `body.instance`, `body.data.instance` ou `body.data.key.instance`
+  // dependendo da versão da Evolution. Resolve pra qualquer um.
+  const instanceFromPayload: string | undefined =
+    body?.instance ??
+    body?.data?.instance ??
+    body?.data?.key?.instance ??
+    undefined;
+
   if (!texto || !remoteJid) {
     return NextResponse.json({ ok: true, skipped: true });
   }
@@ -66,22 +87,40 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, skipped: true });
   }
 
-  // 2. Identificar user pelo JID do grupo
+  // 2. Identificar user:
+  //    (a) por instance do payload (multi-tenant — caso normal)
+  //    (b) fallback por whatsapp_group_jid (legacy Nicolas, instance fixa)
   const supabase = createServiceClient();
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('id')
-    .eq('whatsapp_group_jid', remoteJid)
-    .maybeSingle();
+  let profile: { id: string } | null = null;
 
-  if (!profile) return NextResponse.json({ ok: true, skipped: 'unlinked_group' });
+  if (instanceFromPayload) {
+    const r = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('evolution_instance_name', instanceFromPayload)
+      .maybeSingle();
+    profile = r.data;
+  }
+
+  if (!profile) {
+    const r = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('whatsapp_group_jid', remoteJid)
+      .maybeSingle();
+    profile = r.data;
+  }
+
+  if (!profile) {
+    return NextResponse.json({ ok: true, skipped: 'unlinked_group_or_instance' });
+  }
   const userId = profile.id;
 
   // 3. ACK VISUAL em paralelo com parse IA.
   // O ack sai imediatamente (Evolution tem fila interna, entrega em ms),
   // o parser roda em paralelo. Quando o parser terminar, mandamos a
   // confirmação detalhada.
-  const ackPromise = safeSend(remoteJid, `⏳ Anotando…`);
+  const ackPromise = safeSend(remoteJid, `⏳ Anotando…`, instanceFromPayload);
 
   let parsed;
   try {
@@ -94,7 +133,7 @@ export async function POST(req: NextRequest) {
   } catch (e: any) {
     console.error('parser error:', e);
     await ackPromise;
-    await safeSend(remoteJid, '⚠️ Erro ao interpretar. Tente reformular.');
+    await safeSend(remoteJid, '⚠️ Erro ao interpretar. Tente reformular.', instanceFromPayload);
     return NextResponse.json({ ok: true, error: 'parser' });
   }
 
@@ -105,7 +144,8 @@ export async function POST(req: NextRequest) {
   if (parsed.intent === 'outro' || parsed.confidence < 0.6) {
     await safeSend(
       remoteJid,
-      '🤔 Não entendi. Pode reformular?\n\nExemplos:\n• "gastei 50 no mercado"\n• "recebi 1500 de freelance"\n• "quanto gastei esse mês?"'
+      '🤔 Não entendi. Pode reformular?\n\nExemplos:\n• "gastei 50 no mercado"\n• "recebi 1500 de freelance"\n• "quanto gastei esse mês?"',
+      instanceFromPayload,
     );
     return NextResponse.json({ ok: true, intent: 'outro' });
   }
@@ -139,7 +179,7 @@ export async function POST(req: NextRequest) {
         })
         .select()
         .single(),
-      safeSend(remoteJid, confirmacao),
+      safeSend(remoteJid, confirmacao, instanceFromPayload),
     ]);
 
     const { data: inserted, error } = insertResult;
@@ -151,7 +191,7 @@ export async function POST(req: NextRequest) {
       const reply = isDupe
         ? `ℹ️ Essa mensagem já tinha sido registrada antes.`
         : `⚠️ Erro ao salvar: ${error?.message ?? 'desconhecido'}`;
-      await safeSend(remoteJid, reply);
+      await safeSend(remoteJid, reply, instanceFromPayload);
       return NextResponse.json({ ok: true, error: isDupe ? 'duplicate' : 'db' });
     }
 
@@ -160,7 +200,7 @@ export async function POST(req: NextRequest) {
 
   if (parsed.intent === 'consulta') {
     const result = await responderConsulta(userId, parsed);
-    await safeSend(remoteJid, result.reply);
+    await safeSend(remoteJid, result.reply, instanceFromPayload);
     return NextResponse.json({ ok: true, intent: 'consulta' });
   }
 
@@ -179,7 +219,7 @@ export async function POST(req: NextRequest) {
       },
       messageId
     );
-    await safeSend(remoteJid, result.reply);
+    await safeSend(remoteJid, result.reply, instanceFromPayload);
     return NextResponse.json({ ok: true, intent: 'compromisso', id: result.id });
   }
 
@@ -201,7 +241,7 @@ export async function POST(req: NextRequest) {
         .limit(1)
         .maybeSingle();
       if (!comp) {
-        await safeSend(remoteJid, `🤷 Não achei compromisso com "${desc}".`);
+        await safeSend(remoteJid, `🤷 Não achei compromisso com "${desc}".`, instanceFromPayload);
         return NextResponse.json({ ok: true, intent: 'acao' });
       }
       const { data: parc } = await supabase
@@ -212,25 +252,25 @@ export async function POST(req: NextRequest) {
         .eq('numero', num)
         .maybeSingle();
       if (!parc) {
-        await safeSend(remoteJid, `🤷 Parcela ${num} não encontrada.`);
+        await safeSend(remoteJid, `🤷 Parcela ${num} não encontrada.`, instanceFromPayload);
         return NextResponse.json({ ok: true, intent: 'acao' });
       }
       const result = await marcarParcelaPaga(parc.id, userId);
-      await safeSend(remoteJid, result.reply);
+      await safeSend(remoteJid, result.reply, instanceFromPayload);
       return NextResponse.json({ ok: true, intent: 'acao' });
     }
 
     const result = await executarAcao(userId, a.acao, a.alvo);
-    await safeSend(remoteJid, result.reply);
+    await safeSend(remoteJid, result.reply, instanceFromPayload);
     return NextResponse.json({ ok: true, intent: 'acao', deleted: result.deleted ?? 0 });
   }
 
   return NextResponse.json({ ok: true, skipped: true });
 }
 
-async function safeSend(destino: string, texto: string) {
+async function safeSend(destino: string, texto: string, instance?: string) {
   try {
-    await evolutionEnviarTexto(destino, texto);
+    await evolutionEnviarTexto(destino, texto, 0, 45_000, instance);
   } catch (e) {
     console.error('evolution send error:', e);
   }

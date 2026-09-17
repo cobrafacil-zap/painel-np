@@ -1,25 +1,77 @@
 import { NextResponse } from 'next/server';
-import { requireUser } from '@/lib/supabase/server';
+import { requireUser, createClient } from '@/lib/supabase/server';
 import {
   evolutionInstanceStatus,
   evolutionQRCode,
   EvolutionNotConfiguredError,
 } from '@/lib/evolution';
 
+/**
+ * GET /api/evolution/status
+ *
+ * Retorna status da instância Evolution do usuário logado.
+ *
+ * Se o usuário ainda não tem `evolution_instance_name`, retorna
+ * `{ needsProvisioning: true }` pra UI mostrar botão de provisionar.
+ *
+ * Se já tem, busca status atual + QR (se não estiver 'open') e sincroniza
+ * o `evolution_status` no profile.
+ */
 export async function GET() {
-  await requireUser();
+  const { userId } = await requireUser();
+  const supabase = await createClient();
+
+  const { data: profile, error: profileErr } = await supabase
+    .from('profiles')
+    .select('evolution_instance_name, evolution_status, evolution_owner_jid')
+    .eq('id', userId)
+    .single();
+
+  if (profileErr) {
+    return NextResponse.json({ error: profileErr.message }, { status: 500 });
+  }
+
+  if (!profile?.evolution_instance_name) {
+    return NextResponse.json({
+      needsProvisioning: true,
+      instanceName: null,
+      status: null,
+      qr: null,
+    });
+  }
+
   try {
-    const status = await evolutionInstanceStatus();
+    const status = await evolutionInstanceStatus(profile.evolution_instance_name);
     const qr =
-      status.state !== 'open' ? await evolutionQRCode().catch(() => null) : null;
-    return NextResponse.json({ status, qr });
+      status.state !== 'open'
+        ? await evolutionQRCode(profile.evolution_instance_name).catch(() => null)
+        : null;
+
+    // Sincroniza status se mudou
+    if (status.state !== profile.evolution_status) {
+      await supabase
+        .from('profiles')
+        .update({ evolution_status: status.state })
+        .eq('id', userId);
+    }
+
+    return NextResponse.json({
+      needsProvisioning: false,
+      instanceName: profile.evolution_instance_name,
+      status,
+      qr,
+      ownerJid: profile.evolution_owner_jid ?? null,
+    });
   } catch (e: any) {
     if (e instanceof EvolutionNotConfiguredError) {
-      return NextResponse.json({ error: e.message, code: 'NOT_CONFIGURED' }, { status: 501 });
+      return NextResponse.json(
+        { error: e.message, code: 'NOT_CONFIGURED' },
+        { status: 501 }
+      );
     }
     console.error('[evolution/status]', e);
     return NextResponse.json(
-      { error: e?.message ?? 'erro', stack: e?.stack?.split('\n').slice(0, 3).join('\n') },
+      { error: e?.message ?? 'erro' },
       { status: 500 }
     );
   }
