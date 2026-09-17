@@ -176,24 +176,24 @@ export async function evolutionConfigurarWebhook(
     apikey: cfg.apiKey,
     "Content-Type": "application/json",
   };
-  // Evolution API v2 espera payload FLAT com camelCase (webhookBase64,
-  // webhookByEvents). O formato aninhado {webhook:{...}} é da v1 e é
-  // silenciosamente ignorado em algumas versões — a config fica "enabled"
-  // mas webhookBase64 fica sempre false. Por isso áudio vinha sem base64.
+  // Evolution 2.3.7 do seu servidor exige payload com wrapper {webhook:{...}}
+  // e snake_case (webhook_by_events, webhook_base64). Já testei camelCase/flat
+  // e o servidor rejeita com 400 "instance requires property webhook".
+  // ATENÇÃO: webhookBase64/webhook_base64 é SILENCIOSAMENTE ignorado por
+  // essa versão da Evolution — ela devolve base64:false no GET independente
+  // do que mandamos. Por isso o handler tem fallback via
+  // getBase64FromMediaMessage.
   const body: Record<string, unknown> = {
-    enabled: true,
-    url: webhookUrl,
-    webhookByEvents: false,
-    // base64:true faz a Evolution incluir o conteúdo do mídia (áudio,
-    // imagem, vídeo, doc) no payload do webhook. Pra áudio é essencial
-    // pra podermos transcrever sem chamada extra.
-    // Custo: payload ~33% maior, mas o `messages.upsert` mais comum
-    // (texto) não tem mídia e não é afetado.
-    webhookBase64: true,
-    events: ["MESSAGES_UPSERT"],
+    webhook: {
+      enabled: true,
+      url: webhookUrl,
+      webhook_by_events: false,
+      webhook_base64: true,
+      events: ["MESSAGES_UPSERT"],
+    },
   };
   if (secret) {
-    body.webhookCustomHeaders = [
+    body.webhook_custom_headers = [
       { name: "X-Webhook-Secret", value: secret },
     ];
   }
