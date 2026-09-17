@@ -78,6 +78,55 @@ export async function POST(req: NextRequest) {
     body?.data?.key?.instance ??
     undefined;
 
+  // === IDENTIFICAÇÃO E FILTRO DE GRUPO — DEVE VIR ANTES DE QUALQUER safeSend ===
+  //
+  // Por quê isso fica aqui e não depois:
+  // 1. Sem essa checagem cedo, qualquer mensagem em qualquer conversa
+  //    dispara `safeSend('🎙️ Transcrevendo…')`, que é EXATAMENTE o bug
+  //    que apareceu na conversa particular com a Priscila — bot mandou
+  //    'Transcrevendo…' em DM.
+  // 2. A regra é dura: bot SÓ fala no whatsapp_group_jid salvo no profile.
+  //    Em conversa privada 1:1, grupo com amigos, qualquer outro JID
+  //    → ignora silenciosamente, sem mandar nada.
+  const supabase = createServiceClient();
+  let profile: { id: string; whatsapp_group_jid: string | null } | null = null;
+
+  if (instanceFromPayload) {
+    const r = await supabase
+      .from('profiles')
+      .select('id, whatsapp_group_jid')
+      .eq('evolution_instance_name', instanceFromPayload)
+      .maybeSingle();
+    profile = r.data;
+  }
+
+  if (!profile) {
+    const r = await supabase
+      .from('profiles')
+      .select('id, whatsapp_group_jid')
+      .eq('whatsapp_group_jid', remoteJid)
+      .maybeSingle();
+    profile = r.data;
+  }
+
+  if (!profile) {
+    return NextResponse.json({ ok: true, skipped: 'unlinked_group_or_instance' });
+  }
+  const userId = profile.id;
+
+  if (!profile.whatsapp_group_jid) {
+    return NextResponse.json({ ok: true, skipped: 'no_group_configured' });
+  }
+  if (remoteJid !== profile.whatsapp_group_jid) {
+    console.log(
+      `[webhook] ignora mensagem fora do grupo (remoteJid=${remoteJid} != ${profile.whatsapp_group_jid})`
+    );
+    return NextResponse.json({
+      ok: true,
+      skipped: 'not_target_group',
+    });
+  }
+
   // === ÁUDIO: se for audioMessage, transcreve e usa como texto ===
   // Caminho 1 (preferido): webhook veio com `message.base64` (webhookBase64:true).
   // Caminho 2 (fallback): webhookBase64 não está ativo na Evolution 2.3.7
@@ -183,54 +232,6 @@ export async function POST(req: NextRequest) {
   // participant — o loop guard acima já cobre esse caso).
   if (key?.fromMe && !remoteJid.endsWith('@g.us')) {
     return NextResponse.json({ ok: true, skipped: true });
-  }
-
-  // 2. Identificar user:
-  //    (a) por instance do payload (multi-tenant — caso normal)
-  //    (b) fallback por whatsapp_group_jid (legacy Nicolas, instance fixa)
-  const supabase = createServiceClient();
-  let profile: { id: string; whatsapp_group_jid: string | null } | null = null;
-
-  if (instanceFromPayload) {
-    const r = await supabase
-      .from('profiles')
-      .select('id, whatsapp_group_jid')
-      .eq('evolution_instance_name', instanceFromPayload)
-      .maybeSingle();
-    profile = r.data;
-  }
-
-  if (!profile) {
-    const r = await supabase
-      .from('profiles')
-      .select('id, whatsapp_group_jid')
-      .eq('whatsapp_group_jid', remoteJid)
-      .maybeSingle();
-    profile = r.data;
-  }
-
-  if (!profile) {
-    return NextResponse.json({ ok: true, skipped: 'unlinked_group_or_instance' });
-  }
-  const userId = profile.id;
-
-  // FILTRO DE SEGURANÇA: só responde no grupo dedicado salvo no profile.
-  // Sem isso, qualquer mensagem recebida em qualquer conversa (incluindo
-  // grupos com amigos ou 1:1 com contatos como a Priscila) dispara o parser
-  // e o bot responde lá. Esse filtro é o ÚNICO ponto de defesa contra
-  // isso, então a regra é dura: remoteJid TEM que bater com o grupo salvo.
-  // Se o user ainda não salvou grupo, ignora tudo (evita "alguém mandou
-  // 'oi' e o bot respondeu 'Anotando…' em conversa particular").
-  if (!profile.whatsapp_group_jid) {
-    return NextResponse.json({ ok: true, skipped: 'no_group_configured' });
-  }
-  if (remoteJid !== profile.whatsapp_group_jid) {
-    return NextResponse.json({
-      ok: true,
-      skipped: 'not_target_group',
-      remoteJid,
-      expected: profile.whatsapp_group_jid,
-    });
   }
 
   // 3. ACK VISUAL em paralelo com parse IA.
