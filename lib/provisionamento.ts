@@ -40,15 +40,20 @@ export async function provisionarInstancia(userId: string): Promise<ProvisionarR
   }
 
   if (existing?.evolution_instance_name) {
-    const status = await evolutionInstanceStatus(existing.evolution_instance_name).catch(
-      () => ({ instanceName: existing.evolution_instance_name!, state: 'unknown' as const })
-    );
-    return {
-      ok: true,
-      instanceName: existing.evolution_instance_name,
-      alreadyProvisioned: true,
-      status,
-    };
+    // Se está como 'pending', o provisionamento anterior falhou no meio —
+    // forçar reprocessamento em vez de marcar como já provisionado.
+    if (existing.evolution_status !== 'pending') {
+      const status = await evolutionInstanceStatus(existing.evolution_instance_name).catch(
+        () => ({ instanceName: existing.evolution_instance_name!, state: 'unknown' as const })
+      );
+      return {
+        ok: true,
+        instanceName: existing.evolution_instance_name,
+        alreadyProvisioned: true,
+        status,
+      };
+    }
+    // 'pending' no banco → cai pra reprovisionar abaixo (reusa o nome)
   }
 
   // 1. Gerar nome único via RPC
