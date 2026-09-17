@@ -160,6 +160,9 @@ EXEMPLOS:
 "emprestei 500 pro joao em 2x" →
 {"intent":"compromisso","confidence":0.95,"tipo":"receber","descricao":"empréstimo para joão","valor_total":500,"total_parcelas":2,"recorrencia":"mensal","data_primeira":null}
 
+"recebi 300 emprestado do pai" →
+{"intent":"compromisso","confidence":0.94,"tipo":"pagar","descricao":"empréstimo do pai","valor_total":300,"total_parcelas":1,"recorrencia":"unica","data_primeira":null}
+
 "fatura do cartao 1500 vence dia 20" →
 {"intent":"compromisso","confidence":0.94,"tipo":"pagar","descricao":"fatura do cartão","valor_total":1500,"total_parcelas":1,"recorrencia":"unica","data_primeira":null}
 
@@ -184,7 +187,10 @@ REGRAS:
 - Se encontrar verbo financeiro (gastei/paguei/recebi/ganhei/comprei) E um valor numérico na frase, é SEMPRE "lancamento", nunca "outro".
 - "apagar", "remover", "deletar", "tirar", "excluir" + ("último" | "ultimo") → acao="apagar_ultimo".
 - "apagar"/"remover"/"deletar" + nome de categoria (mercado, posto, uber…) → acao="apagar_categoria", alvo=<slug>.
-- "peguei"/"emprestei"/"faturei"/"comprei parcelado" + valor + pessoa/algo → intent="compromisso", tipo conforme devo/recebo.
+- "peguei"/"tirei"/"recebi" + ("emprestado"|"emprestimo") → tipo="pagar" (eu devo devolver).
+- "emprestei"/"dei emprestado" → tipo="receber" (me devem).
+- "faturei"/"comprei parcelado" + valor → tipo="pagar".
+- "recebi de volta"/"me pagaram" → registra pagamento de parcela (intent="acao").
 - "em Nx", "N vezes", "N parcelas" → total_parcelas=N. Senão, 1.
 - "por mês" → recorrencia="mensal". "por semana" → "semanal". Sem dica → "mensal".
 - "o que tenho pra pagar", "minhas parcelas", "contas a pagar" → tipo="compromissos" ou "parcelas" no intent="consulta".

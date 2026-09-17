@@ -66,6 +66,32 @@ export async function criarCompromisso(
 
   const c = comp as Compromisso;
 
+  // Lançamento espelhado no fluxo de caixa:
+  // - "peguei emprestado" (a pagar) → receita de hoje (entrou dinheiro)
+  // - "emprestei" (a receber) → gasto de hoje (saiu do meu bolso)
+  // Vinculado ao compromisso via metadata.compromisso_id pra rastreabilidade.
+  // Idempotência: usa messageId quando vier do WhatsApp.
+  if (messageId || input.source_message_id) {
+    const idMsg = messageId ?? input.source_message_id ?? null;
+    const lancamentoTipo = input.tipo === 'pagar' ? 'receita' : 'gasto';
+    const { error: lerr } = await supabase.from('records').insert({
+      user_id: userId,
+      module_id: 'financeiro',
+      type: lancamentoTipo,
+      amount: input.valor_total,
+      category: null,
+      description: `${input.tipo === 'pagar' ? '💸 Empréstimo recebido' : '🤝 Empréstimo dado'}: ${input.descricao}`,
+      payment_method: null,
+      occurred_at: new Date().toISOString().slice(0, 10),
+      source: input.source ?? 'whatsapp',
+      source_message_id: idMsg ? `${idMsg}:lanc` : null,
+      metadata: { compromisso_id: c.id, automatico: true },
+    });
+    if (lerr && !lerr.message?.toLowerCase().includes('duplicate')) {
+      console.error('lançamento espelho falhou:', lerr);
+    }
+  }
+
   // Se tem parcelas, gera as linhas de parcela
   if (totalParcelas > 1) {
     const valorParcela = input.valor_total / totalParcelas;
@@ -98,11 +124,19 @@ export async function criarCompromisso(
     }
   }
 
-  return {
-    reply: formatarConfirmacao(c, totalParcelas, input.valor_total / totalParcelas),
-    ok: true,
-    id: c.id,
-  };
+  // Monta reply incluindo o lançamento espelhado
+  const sinal = input.tipo === 'pagar' ? '+' : '−';
+  const tipoLabel = input.tipo === 'pagar' ? 'a pagar' : 'a receber';
+  const lancLabel = input.tipo === 'pagar' ? 'receita' : 'gasto';
+  let reply = `📌 Compromisso de ${tipoLabel} criado: ${input.descricao}\n`;
+  reply += `💰 Lançamento de ${lancLabel}: ${sinal}${formatBRL(input.valor_total)}\n`;
+  if (totalParcelas > 1) {
+    reply += `📅 ${totalParcelas}x de ${formatBRL(input.valor_total / totalParcelas)} (${c.recorrencia})`;
+  } else if (input.data_vencimento) {
+    reply += `📅 Vence em ${formatarDataBR(input.data_vencimento)}`;
+  }
+
+  return { reply, ok: true, id: c.id };
 }
 
 function calcularProximaParcela(
