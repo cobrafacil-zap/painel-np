@@ -181,7 +181,12 @@ export async function evolutionConfigurarWebhook(
       enabled: true,
       url: webhookUrl,
       webhook_by_events: false,
-      webhook_base64: false,
+      // base64:true faz a Evolution incluir o conteúdo do mídia (áudio,
+      // imagem, vídeo, doc) no payload do webhook. Pra áudio é essencial
+      // pra podermos transcrever sem chamada extra.
+      // Custo: payload ~33% maior, mas o `messages.upsert` mais comum
+      // (texto) não tem mídia e não é afetado.
+      webhook_base64: true,
       events: ["MESSAGES_UPSERT"],
     },
   };

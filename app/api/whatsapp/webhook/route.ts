@@ -5,6 +5,7 @@ import { responderConsulta } from '@/modules/financeiro/lib/consultas';
 import { executarAcao } from '@/modules/financeiro/lib/acoes';
 import { criarCompromisso, resumoCompromissos, listarParcelas, marcarParcelaPaga } from '@/modules/financeiro/lib/compromissos';
 import { evolutionEnviarTexto } from '@/lib/evolution';
+import { transcreverAudio } from '@/lib/transcricao';
 import { formatBRL, todayISO } from '@/lib/utils';
 import type { FinanceRecord } from '@/lib/types';
 
@@ -58,7 +59,7 @@ export async function POST(req: NextRequest) {
   if (event !== 'messages.upsert') return NextResponse.json({ ok: true, skipped: true });
   if (!message) return NextResponse.json({ ok: true, skipped: true });
 
-  const texto: string =
+  let texto: string =
     message?.conversation ||
     message?.extendedTextMessage?.text ||
     message?.buttonsResponseMessage?.selectedDisplayText ||
@@ -74,6 +75,51 @@ export async function POST(req: NextRequest) {
     body?.data?.instance ??
     body?.data?.key?.instance ??
     undefined;
+
+  // === ÁUDIO: se for audioMessage com base64, transcreve e usa como texto ===
+  // iOS às vezes envia em ephemeralMessage.message.audioMessage; cobre os dois.
+  const audioMsg =
+    message?.audioMessage ??
+    message?.ephemeralMessage?.message?.audioMessage ??
+    null;
+  if (audioMsg && !texto) {
+    const audioBase64: string | undefined = message?.base64 ?? message?.ephemeralMessage?.message?.base64;
+    if (audioBase64) {
+      const mimeType = audioMsg.mimetype ?? 'audio/ogg';
+      console.log(`[webhook] transcrevendo áudio (${audioMsg.seconds ?? '?'}s, ${mimeType})`);
+      const ackPromise = safeSend(remoteJid, `🎙️ Transcrevendo…`, instanceFromPayload);
+      const transcricao = await transcreverAudio(audioBase64, mimeType);
+      if (transcricao) {
+        console.log(`[webhook] transcrição: "${transcricao.slice(0, 80)}"`);
+        // Substitui o texto pela transcrição
+        Object.assign(message, { conversation: transcricao, __transcribed: true });
+        // ack da transcrição chegou, deixa ele sair antes
+        await ackPromise;
+      } else {
+        await ackPromise;
+        await safeSend(remoteJid, '⚠️ Não consegui transcrever o áudio. Tente enviar em texto.', instanceFromPayload);
+        return NextResponse.json({ ok: true, skipped: 'transcribe_failed' });
+      }
+    } else {
+      // Áudio sem base64: webhook não foi configurado com base64:true OU áudio
+      // muito antigo. Avisa o usuário pra reenviar o webhook.
+      console.warn('[webhook] audioMessage sem base64 — webhook precisa de webhook_base64=true');
+      await safeSend(remoteJid, '⚠️ Áudio sem mídia anexada. Reconfigure o webhook com base64:true.', instanceFromPayload);
+      return NextResponse.json({ ok: true, skipped: 'no_audio_base64' });
+    }
+  }
+
+  // Re-lê texto após possível transcrição (audioMessage path pode ter
+  // sobrescrito message.conversation com a transcrição).
+  if (texto) {
+    // já tem texto (texto original), mantém
+  } else {
+    texto =
+      message?.conversation ||
+      message?.extendedTextMessage?.text ||
+      message?.buttonsResponseMessage?.selectedDisplayText ||
+      '';
+  }
 
   if (!texto || !remoteJid) {
     return NextResponse.json({ ok: true, skipped: true });
