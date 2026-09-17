@@ -45,6 +45,7 @@ export async function responderConsulta(userId: string, intent: Extract<ParsedIn
       .lte('occurred_at', to);
 
     if (intent.tipo !== 'saldo') q = q.eq('type', intent.tipo === 'gastos' ? 'gasto' : 'receita');
+    if (intent.categoria) q = q.eq('category', intent.categoria);
 
     const { data, error } = await q;
     if (error) return { reply: `Erro ao consultar: ${error.message}` };
@@ -60,11 +61,12 @@ export async function responderConsulta(userId: string, intent: Extract<ParsedIn
 
     const total = rows.reduce((s, r) => s + Number(r.amount), 0);
     const tipoLabel = intent.tipo === 'gastos' ? 'gastos' : 'receitas';
-    return { reply: `Total de ${tipoLabel} em ${label}: ${formatBRL(total)} (${rows.length} lançamento${rows.length === 1 ? '' : 's'})` };
+    const catLabel = intent.categoria ? ` em '${intent.categoria}'` : '';
+    return { reply: `Total de ${tipoLabel}${catLabel} em ${label}: ${formatBRL(total)} (${rows.length} lançamento${rows.length === 1 ? '' : 's'})` };
   }
 
   if (intent.tipo === 'top_categoria') {
-    const { data, error } = await supabase
+    let q = supabase
       .from('records')
       .select('category, amount')
       .eq('user_id', userId)
@@ -72,7 +74,9 @@ export async function responderConsulta(userId: string, intent: Extract<ParsedIn
       .eq('type', 'gasto')
       .gte('occurred_at', from)
       .lte('occurred_at', to);
+    if (intent.categoria) q = q.eq('category', intent.categoria);
 
+    const { data, error } = await q;
     if (error) return { reply: `Erro: ${error.message}` };
 
     const soma: Record<string, number> = {};

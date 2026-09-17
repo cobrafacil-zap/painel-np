@@ -28,6 +28,7 @@ export type ParsedIntent =
       total_parcelas: number;
       recorrencia: 'unica' | 'semanal' | 'mensal' | 'anual';
       data_primeira: string | null;
+      category?: string | null;
     }
   | {
       intent: 'consulta';
@@ -52,7 +53,16 @@ Responda SEMPRE em JSON puro (sem markdown, sem comentários, sem texto antes/de
 
 CATEGORIAS (use o slug quando tiver certeza; senão devolva null):
 mercado, transporte, alimentacao, moradia, saude, lazer, educacao,
-assinaturas, freelance, salario, investimentos, posto, cartao_credito, outros
+contas_casa, assinaturas, freelance, salario, investimentos, posto, cartao_credito, outros
+
+DISTINÇÃO IMPORTANTE:
+- "moradia" = aluguel, condomínio, IPTU, financiamento imobiliário (gastos
+  com o imóvel em si).
+- "contas_casa" = luz, água, gás, internet, telefone, TV a cabo (utilities
+  recorrentes da casa). SEMPRE categoria "contas_casa" quando o usuário
+  falar "conta de luz/água/internet" ou só "luz/água/internet".
+- "assinaturas" = Netflix, Spotify, streaming, serviços digitais (não conta
+  de casa física).
 
 FORMAS DE PAGAMENTO (slug):
 pix, cartao_credito, cartao_debito, dinheiro, boleto, transferencia
@@ -102,8 +112,8 @@ EXEMPLOS DE LANÇAMENTO
 "Gastei 13 no posto de gasolina" → {"intent":"lancamento","confidence":0.95,"type":"gasto","amount":13,"category":"posto","description":"posto de gasolina","payment_method":null,"occurred_at":null}
 "coloquei 50 de gasolina" → {"intent":"lancamento","confidence":0.95,"type":"gasto","amount":50,"category":"posto","description":"gasolina","payment_method":null,"occurred_at":null}
 "comprei 30 de mercado" → {"intent":"lancamento","confidence":0.95,"type":"gasto","amount":30,"category":"mercado","description":"mercado","payment_method":null,"occurred_at":null}
-"paguei 80 de conta de luz" → {"intent":"lancamento","confidence":0.94,"type":"gasto","amount":80,"category":"moradia","description":"conta de luz","payment_method":null,"occurred_at":null}
-"tenho uma conta de internet de 135 reais" → {"intent":"lancamento","confidence":0.93,"type":"gasto","amount":135,"category":"assinaturas","description":"internet","payment_method":null,"occurred_at":null}
+"paguei 80 de conta de luz" → {"intent":"lancamento","confidence":0.94,"type":"gasto","amount":80,"category":"contas_casa","description":"conta de luz","payment_method":null,"occurred_at":null}
+"tenho uma conta de internet de 135 reais" → {"intent":"lancamento","confidence":0.93,"type":"gasto","amount":135,"category":"contas_casa","description":"internet","payment_method":null,"occurred_at":null}
 "saiu 50 de gasolina" → {"intent":"lancamento","confidence":0.94,"type":"gasto","amount":50,"category":"posto","description":"gasolina","payment_method":null,"occurred_at":null}
 "é 80 de academia por mês" → {"intent":"lancamento","confidence":0.91,"type":"gasto","amount":80,"category":"saude","description":"academia","payment_method":null,"occurred_at":null}
 "custou 35 o almoço" → {"intent":"lancamento","confidence":0.95,"type":"gasto","amount":35,"category":"alimentacao","description":"almoço","payment_method":null,"occurred_at":null}
@@ -178,8 +188,8 @@ REGRAS CRÍTICAS (NUNCA ESQUEÇA)
 • "faturei"/"comprei parcelado"/"parcelei" → tipo=pagar.
 • Datas relativas sem dia ("amanhã", "semana que vem", "mês que vem") → null (sistema calcula).
 • Se a frase tiver verbo financeiro (gastei/paguei/recebi/ganhei/comprei/peguei/emprestei/tirei/faturei/saiu/custou/foi/é/tenho/vou pagar) E um valor monetário, é "lancamento" OU "compromisso" — NUNCA "outro".
-• "tenho uma conta de X de N reais" / "pago N de X" / "X tá N" / "X custa N" → lancamento gasto recorrente (categoria conforme X: internet/luz/água = moradia, academia = saude, etc).
-• CONTAS FIXAS MENSais (internet, luz, água, gás, telefone, aluguel, academia, streaming) → categoria "moradia" pra utilidades da casa, "assinaturas" pra serviços digitais (Netflix, Spotify), "saude" pra plano de saúde e academia. Mesmo sem verbo explícito, "conta de X de N" é gasto.
+• "tenho uma conta de X de N reais" / "pago N de X" / "X tá N" / "X custa N" → lancamento gasto recorrente (categoria conforme X: internet/luz/água/gás/telefone = contas_casa, aluguel/condomínio = moradia, academia = saude, streaming = assinaturas).
+• CONTAS FIXAS MENSais (luz, água, gás, internet, telefone, TV a cabo) → categoria "contas_casa". Aluguel/condomínio/IPTU → "moradia". Streaming (Netflix, Spotify) → "assinaturas". Academia/plano de saúde → "saude". Mesmo sem verbo explícito, "conta de X de N" é gasto.
 • CONFIDENCE: 0.95+ para casos claros. 0.7-0.9 se tem ambiguidade. <0.7 só se realmente não dá pra saber.
 • NÃO escreva markdown, comentários, explicações — SOMENTE o JSON.
 • NÃO use aspas escapadas inválidas. Use aspas duplas normais.
@@ -360,7 +370,19 @@ function tentarParseLocal(texto: string): ParsedIntent | null {
       else if (/semana/.test(tl)) periodo = 'semana';
       else if (/m[êe]s\s+passado/.test(tl)) periodo = 'mes_passado';
       else if (/tudo|total|geral/.test(tl)) periodo = 'tudo';
-      return { intent: 'consulta', confidence: 0.95, tipo: 'gastos', periodo, categoria: null };
+      // Detecta categoria no final: "quanto gastei de contas de casa esse mês?"
+      let categoria: string | null = null;
+      if (/\b(?:de|do|da)\s+contas?\s+de\s+casa|contas?\s+de\s+casa/i.test(tl)) categoria = 'contas_casa';
+      else if (/\b(?:de|do|da)\s+moradia|aluguel/i.test(tl)) categoria = 'moradia';
+      else if (/\b(?:de|do|da)\s+assinaturas?|streaming/i.test(tl)) categoria = 'assinaturas';
+      else if (/\b(?:de|do|da)\s+mercado/i.test(tl)) categoria = 'mercado';
+      else if (/\b(?:de|do|da)\s+posto|gasolina/i.test(tl)) categoria = 'posto';
+      else if (/\b(?:de|do|da)\s+transporte|uber/i.test(tl)) categoria = 'transporte';
+      else if (/\b(?:de|do|da)\s+alimentacao|ifood|restaurante|comida/i.test(tl)) categoria = 'alimentacao';
+      else if (/\b(?:de|do|da)\s+saude|academia|farmacia/i.test(tl)) categoria = 'saude';
+      else if (/\b(?:de|do|da)\s+lazer/i.test(tl)) categoria = 'lazer';
+      else if (/\b(?:de|do|da)\s+educacao|curso/i.test(tl)) categoria = 'educacao';
+      return { intent: 'consulta', confidence: 0.95, tipo: 'gastos', periodo, categoria };
     }
     if (/receb[ei]|receitas/.test(tl)) {
       return { intent: 'consulta', confidence: 0.94, tipo: 'receitas', periodo: 'mes', categoria: null };
@@ -530,6 +552,19 @@ function tentarParseLocal(texto: string): ParsedIntent | null {
     const venceMatch = t.match(/\bvence\s+(?:dia\s+)?(\d{1,2})\b/i);
     if (venceMatch) data_vencimento = `DIA_${parseInt(venceMatch[1], 10)}`;
 
+    // Categoria: separa aluguel/condomínio (moradia) de utilities (contas_casa)
+    // pra permitir consultas tipo "quanto gasto de contas de casa esse mês?"
+    let category: string | null = null;
+    if (/\b(aluguel|condom[ií]nio|iptu|prestação|prestacao|financ[aã]mento|im[óo]vel)/i.test(t)) {
+      category = 'moradia';
+    } else if (/\b(luz|energia|enel|cemig|cpfl|elektro|água|agua|sabesp|copasa|g[áa]s|comg[áa]s|internet|wifi|wi-fi|net\b|banda\s+larga|fibra|telefone|celular|tv\s+a\s+cabo|sky|claro\s+tv|net\s+combo)/i.test(t)) {
+      category = 'contas_casa';
+    } else if (/\b(netflix|spotify|streaming|amazon\s+prime|disney|hbo|apple\s+music|deezer|youtube\s+premium)/i.test(t)) {
+      category = 'assinaturas';
+    } else if (/\b(academia|plano\s+de\s+sa[úu]de|farm[áa]cia)/i.test(t)) {
+      category = 'saude';
+    }
+
     return {
       intent: 'compromisso',
       confidence: 0.92,
@@ -539,6 +574,7 @@ function tentarParseLocal(texto: string): ParsedIntent | null {
       total_parcelas: 1,
       recorrencia: 'unica',
       data_primeira: data_vencimento,
+      category,
     };
   }
 
@@ -550,8 +586,9 @@ function tentarParseLocal(texto: string): ParsedIntent | null {
   else if (/\bmercado|supermercado|feira/i.test(t)) category = 'mercado';
   else if (/\buber|99|taxi|ônibus|onibus|metro|metrô/i.test(t)) category = 'transporte';
   else if (/\bifood|i?food|restaurante|lanche|almoço|almoco|jantar|delivery|comida|café|cafe|pizza|hamb[úu]rguer/i.test(t)) category = 'alimentacao';
-  else if (/\baluguel|condom[ií]nio|luz|água|agua|conta\s+de\s+luz/i.test(t)) category = 'moradia';
-  else if (/\binternet|wifi|wi-fi|net\b|banda\s+larga|fibra/i.test(t)) category = 'assinaturas';
+  else if (/\baluguel|condom[ií]nio|iptu|prestação|prestacao|financ[aã]mento|im[óo]vel\b/i.test(t)) category = 'moradia';
+  else if (/\b(luz|energia|enel|cemig|cpfl|elektro|água|agua|sabesp|copasa|g[áa]s|comg[áa]s|telefone|celular|tv\s+a\s+cabo|sky|claro\s+tv|net\s+combo)/i.test(t)) category = 'contas_casa';
+  else if (/\binternet|wifi|wi-fi|net\b|banda\s+larga|fibra/i.test(t)) category = 'contas_casa';
   else if (/\bnetflix|spotify|streaming|amazon\s+prime|disney|hbo|apple\s+music|deezer|youtube\s+premium/i.test(t)) category = 'assinaturas';
   else if (/\bfarm[áa]cia|rem[ée]dio|m[ée]dico|hospital|academia/i.test(t)) category = 'saude';
   else if (/\bcinema|show|festa|viagem|jogo|bar\b|balada/i.test(t)) category = 'lazer';

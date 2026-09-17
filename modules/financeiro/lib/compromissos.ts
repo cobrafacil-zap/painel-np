@@ -18,6 +18,7 @@ export type CompromissoInput = {
   data_vencimento: string | null;
   total_parcelas?: number;          // 1 = sem parcelamento
   recorrencia?: 'unica' | 'semanal' | 'mensal' | 'anual';
+  category?: string | null;         // ex: 'contas_casa', 'moradia', 'assinaturas'
   observacoes?: string | null;
   source?: 'manual' | 'whatsapp' | 'importacao';
   source_message_id?: string | null;
@@ -47,6 +48,7 @@ export async function criarCompromisso(
       descricao: input.descricao,
       valor_total: input.valor_total,
       data_vencimento: input.data_vencimento,
+      category: input.category ?? null,
       observacoes: input.observacoes ?? null,
       source: input.source ?? 'whatsapp',
       source_message_id: messageId ?? input.source_message_id ?? null,

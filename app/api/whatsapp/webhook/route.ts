@@ -334,6 +334,7 @@ export async function POST(req: NextRequest) {
         data_vencimento: dataVenc,
         total_parcelas: c.total_parcelas,
         recorrencia: c.recorrencia,
+        category: c.category ?? null,
       },
       messageId
     );

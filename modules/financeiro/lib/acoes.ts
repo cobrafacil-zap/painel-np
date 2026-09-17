@@ -13,7 +13,7 @@ export type AcaoResult = {
 
 export async function executarAcao(
   userId: string,
-  acao: 'apagar_ultimo' | 'apagar_categoria' | 'pagar_parcela',
+  acao: 'apagar_ultimo' | 'apagar_categoria' | 'pagar_parcela' | 'pagar_conta',
   alvo: string | null
 ): Promise<AcaoResult> {
   const supabase = createServiceClient();
