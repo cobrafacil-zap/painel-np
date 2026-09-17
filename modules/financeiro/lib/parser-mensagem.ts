@@ -473,7 +473,13 @@ function tentarParseLocal(texto: string): ParsedIntent | null {
   }
 
   // === Lançamento: precisa de verbo financeiro explícito ===
-  const temVerboGasto = /\b(gastei|gastar|paguei|pagar|comprei|comprar|sac[ou]ei|debit[ou]|custei|despesa|sa[ií]da)\b/i.test(t);
+  // "tenho uma conta de X de N" / "X tá N" / "X custa N" / "pago N de X" não têm
+  // verbo financeiro direto mas SÃO gastos recorrentes (conta de internet,
+  // academia, aluguel). Reconhecemos esses padrões com `temVerboGasto` ampliado.
+  const temVerboGasto =
+    /\b(gastei|gastar|paguei|pagar|comprei|comprar|sac[ou]ei|debit[ou]|custei|despesa|sa[ií]da)\b/i.test(t) ||
+    // Frases sem verbo: "tenho uma conta de X de R$ N", "pago N de X", "X custa N"
+    /\b(tenho\s+(?:uma|1|uma\s+conta)|pago\s+(?:r\$\s*)?\d|custa\s+(?:r\$\s*)?\d|t[áa]\s+(?:r\$\s*)?\d|saiu\s+(?:r\$\s*)?\d|é\s+(?:r\$\s*)?\d|foi\s+(?:r\$\s*)?\d)\b/i.test(t);
   const temVerboReceita = /\b(recebi|receber|ganhei|ganhar|entrou|caiu|depositou|sal[áa]rio|freelance|cliente|entrada)\b/i.test(t);
 
   if (!temVerboGasto && !temVerboReceita) return null;
@@ -486,9 +492,11 @@ function tentarParseLocal(texto: string): ParsedIntent | null {
   else if (/\bmercado|supermercado|feira/i.test(t)) category = 'mercado';
   else if (/\buber|99|taxi|ônibus|onibus|metro|metrô/i.test(t)) category = 'transporte';
   else if (/\bifood|i?food|restaurante|lanche|almoço|almoco|jantar|delivery|comida|café|cafe|pizza|hamb[úu]rguer/i.test(t)) category = 'alimentacao';
-  else if (/\baluguel|condom[ií]nio|luz|água|agua|internet|conta\s+de\s+luz/i.test(t)) category = 'moradia';
+  else if (/\baluguel|condom[ií]nio|luz|água|agua|conta\s+de\s+luz/i.test(t)) category = 'moradia';
+  else if (/\binternet|wifi|wi-fi|net\b|banda\s+larga|fibra/i.test(t)) category = 'assinaturas';
+  else if (/\bnetflix|spotify|streaming|amazon\s+prime|disney|hbo|apple\s+music|deezer|youtube\s+premium/i.test(t)) category = 'assinaturas';
   else if (/\bfarm[áa]cia|rem[ée]dio|m[ée]dico|hospital|academia/i.test(t)) category = 'saude';
-  else if (/\bcinema|netflix|spotify|show|festa|viagem|streaming|jogo/i.test(t)) category = 'lazer';
+  else if (/\bcinema|show|festa|viagem|jogo|bar\b|balada/i.test(t)) category = 'lazer';
   else if (/\bcurso|livro|faculdade|escola|aula/i.test(t)) category = 'educacao';
 
   return {
