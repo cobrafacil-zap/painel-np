@@ -31,10 +31,12 @@ export const runtime = 'nodejs';
  */
 export async function POST(req: NextRequest) {
   // 0. Validar X-Webhook-Secret (configurado em cada instância Evolution
-  // durante o provisionamento). Se WEBHOOK_SECRET não estiver na env,
-  // aceita tudo (modo dev).
-  const expectedSecret = process.env.WEBHOOK_SECRET;
-  if (expectedSecret) {
+  // durante o provisionamento). Validação ativada SÓ se WEBHOOK_REQUIRE=1
+  // na env, porque algumas versões da Evolution ignoram webhook_custom_headers
+  // silenciosamente — fica tudo bloqueado sem o header nunca chegar.
+  // Por padrão (sem a flag), aceita qualquer request.
+  if (process.env.WEBHOOK_REQUIRE === '1') {
+    const expectedSecret = process.env.WEBHOOK_SECRET;
     const got = req.headers.get('x-webhook-secret');
     if (got !== expectedSecret) {
       console.warn('[webhook] secret inválido (got=%s)', got ? 'present' : 'missing');
