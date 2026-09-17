@@ -26,6 +26,7 @@ export default function WhatsAppPage() {
   const [provisioning, setProvisioning] = useState(false);
   const [setupWebhookLoading, setSetupWebhookLoading] = useState(false);
   const [webhookConfigured, setWebhookConfigured] = useState(false);
+  const [resetting, setResetting] = useState(false);
   const [loading, setLoading] = useState(true);
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -150,6 +151,25 @@ export default function WhatsAppPage() {
       setError(`Webhook: ${e?.message ?? 'erro'}`);
     } finally {
       setSetupWebhookLoading(false);
+    }
+  }
+
+  async function resetarInstancia() {
+    if (!confirm('Isso vai apagar sua instância atual e gerar uma nova. Você vai precisar escanear o QR de novo no WhatsApp. Continuar?')) {
+      return;
+    }
+    setResetting(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/evolution/reset', { method: 'POST' });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.error ?? 'erro ao resetar');
+      // Sucesso: manda pro onboarding que vai reprovisionar do zero
+      router.push('/onboarding/whatsapp');
+    } catch (e: any) {
+      setError(`Reset: ${e?.message ?? 'erro'}`);
+    } finally {
+      setResetting(false);
     }
   }
 
@@ -336,6 +356,25 @@ export default function WhatsAppPage() {
           >
             <Webhook className="w-4 h-4" />
             {webhookConfigured ? '✅ Webhook configurado' : setupWebhookLoading ? 'Configurando…' : 'Configurar webhook agora'}
+          </button>
+        </div>
+      )}
+
+      {data?.instanceName && (
+        <div className="card space-y-3 border border-red-500/20">
+          <div>
+            <h2 className="font-semibold text-red-300">⚠️ Em caso de problema</h2>
+            <p className="text-xs text-zinc-500 mt-1">
+              Se sua instância não conecta, deu 404, ou ficou travada em &quot;connecting&quot;,
+              resete e crie uma nova. Você vai precisar escanear o QR de novo.
+            </p>
+          </div>
+          <button
+            onClick={resetarInstancia}
+            disabled={resetting}
+            className="btn-ghost text-red-300 hover:text-red-200 inline-flex items-center gap-2"
+          >
+            {resetting ? 'Resetando…' : '🔄 Resetar e gerar nova instância'}
           </button>
         </div>
       )}
