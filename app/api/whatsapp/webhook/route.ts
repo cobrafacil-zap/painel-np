@@ -94,13 +94,13 @@ export async function POST(req: NextRequest) {
     parsed = await parseMensagem(texto);
   } catch (e: any) {
     console.error('parser error:', e);
-    await safeSend(remoteJid, '⚠️ Erro ao interpretar a mensagem. Tente reformular.');
+    fireAndForgetSend(remoteJid, '⚠️ Erro ao interpretar a mensagem. Tente reformular.');
     return NextResponse.json({ ok: true, error: 'parser' });
   }
 
   // 5. Roteamento por intent
   if (parsed.intent === 'outro' || parsed.confidence < 0.6) {
-    await safeSend(
+    fireAndForgetSend(
       remoteJid,
       '🤔 Não entendi. Pode reformular?\n\nExemplos:\n• "gastei 50 no mercado"\n• "recebi 1500 de freelance"\n• "quanto gastei esse mês?"'
     );
@@ -133,14 +133,14 @@ export async function POST(req: NextRequest) {
       const reply = isDupe
         ? `ℹ️ Essa mensagem já tinha sido registrada antes.`
         : `⚠️ Erro ao salvar: ${error?.message ?? 'desconhecido'}`;
-      await safeSend(remoteJid, reply);
+      fireAndForgetSend(remoteJid, reply);
       return NextResponse.json({ ok: true, error: isDupe ? 'duplicate' : 'db' });
     }
 
     const sinal = p.type === 'gasto' ? '−' : '+';
     const tipoLabel = p.type === 'gasto' ? 'Gasto' : 'Receita';
     const catLabel = p.category ? ` em '${p.category}'` : '';
-    await safeSend(
+    fireAndForgetSend(
       remoteJid,
       `✅ ${tipoLabel} de ${sinal}${formatBRL(p.amount)}${catLabel} registrado.`
     );
@@ -149,17 +149,21 @@ export async function POST(req: NextRequest) {
 
   if (parsed.intent === 'consulta') {
     const result = await responderConsulta(userId, parsed);
-    await safeSend(remoteJid, result.reply);
+    fireAndForgetSend(remoteJid, result.reply);
     return NextResponse.json({ ok: true, intent: 'consulta' });
   }
 
   return NextResponse.json({ ok: true, skipped: true });
 }
 
-async function safeSend(destino: string, texto: string) {
-  try {
-    await evolutionEnviarTexto(destino, texto);
-  } catch (e) {
+/**
+ * Envia a resposta SEM bloquear o webhook.
+ * A Evolution recebe em ~1-2s em paralelo; a função HTTP retorna 200 imediato.
+ * Se o envio falhar, loga no servidor mas não afeta o usuário.
+ */
+function fireAndForgetSend(destino: string, texto: string) {
+  // Não usa await — a promise fica "voando" e o webhook responde já.
+  evolutionEnviarTexto(destino, texto).catch((e) => {
     console.error('evolution send error:', e);
-  }
+  });
 }
