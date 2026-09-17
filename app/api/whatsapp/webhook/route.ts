@@ -238,25 +238,37 @@ async function safeSend(destino: string, texto: string) {
 
 /**
  * Converte token de data do parser em ISO date (YYYY-MM-DD).
- * Aceita: 'HOJE', 'AMANHA', 'DIA_5' (próximo dia 5 do mês), null.
+ * Aceita: 'HOJE', 'AMANHA', 'DIA_5'.
+ *
+ * IMPORTANTE: comparação de datas IGNORA horário (zero hora) pra evitar
+ * confusão com fuso ou hora de envio da mensagem.
  */
 function tokenParaData(token: string | null | undefined): string | null {
   if (!token) return null;
   const t = token.toUpperCase();
+
+  // Zera o horário pra comparar só a data
   const hoje = new Date();
+  hoje.setHours(0, 0, 0, 0);
+
   if (t === 'HOJE') return hoje.toISOString().slice(0, 10);
+
   if (t === 'AMANHA') {
     const amanha = new Date(hoje);
     amanha.setDate(amanha.getDate() + 1);
     return amanha.toISOString().slice(0, 10);
   }
+
   const m = t.match(/^DIA_(\d{1,2})$/);
   if (m) {
     const dia = parseInt(m[1], 10);
     if (dia >= 1 && dia <= 31) {
-      const d = new Date(hoje.getFullYear(), hoje.getMonth(), dia);
-      // Se já passou esse dia no mês, joga pro próximo mês
-      if (d < hoje) d.setMonth(d.getMonth() + 1);
+      // Mês atual sempre. Se já passou, joga pro próximo.
+      let d = new Date(hoje.getFullYear(), hoje.getMonth(), dia);
+      d.setHours(0, 0, 0, 0);
+      if (d.getTime() < hoje.getTime()) {
+        d = new Date(hoje.getFullYear(), hoje.getMonth() + 1, dia);
+      }
       return d.toISOString().slice(0, 10);
     }
   }
