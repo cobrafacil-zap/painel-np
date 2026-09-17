@@ -232,8 +232,9 @@ function tentarParseLocal(texto: string): ParsedIntent | null {
     }
   }
 
-  // Pra frases longas (>80 chars) ou com várias cláusulas, deixa o Groq decidir.
-  if (t.length > 80) return null;
+  // Pra frases muito longas (>200 chars) ou com várias cláusulas totalmente sem
+  // palavra-chave forte, deixa o Groq decidir.
+  if (t.length > 200) return null;
 
   // === Detectar valor monetário (suporta R$, ponto-e-vírgula BR) ===
   // Procura número com formato R$/valor OU número "puro" razoável
@@ -244,22 +245,52 @@ function tentarParseLocal(texto: string): ParsedIntent | null {
   if (!isFinite(valor) || valor <= 0 || valor > 1_000_000) return null;
 
   // === Compromissos: precisa de palavra-chave forte ===
-  const ehEmprestimoPego = /\b(peguei|tirei|consegui|recebi)\b.*\b(emprestado|empr[eé]stimo|com\s+(a|o)|pra\s+pagar|para\s+pagar|tenho\s+que\s+(pagar|devolver))/i.test(t);
-  const ehEmprestimoDado = /\b(emprestei|dei\s+emprestado|emprestei\s+(pro|para|ao|à))/i.test(t);
-  const ehParcelado = /\b(faturei|fatura\s+(de|do|da)|comprei\s+parcelado|parcelei|em\s+\d+\s*x|em\s+\d+\s+vezes|\d+\s+parcelas?)/i.test(t);
+  const ehEmprestimoPego = /\b(peguei|tirei|consegui|recebi)\b[^.!?]*\b(emprestado|empr[eé]stimo|com\s+(?:a|o|minha|meu|um|uma)|pra\s+pagar|para\s+pagar|tenho\s+(?:que\s+)?(?:pagar|devolver|quitar)|preciso\s+pagar|vou\s+pagar|devolver\s+(?:pra|para))/i.test(t);
+  const ehEmprestimoDado = /\b(emprestei|dei\s+emprestado|emprestei\s+(?:pro|para|ao|à))/i.test(t);
+  const ehParcelado = /\b(faturei|fatura\s+(?:de|do|da)|comprei\s+parcelado|parcelei|em\s+\d+\s*x|em\s+\d+\s+vezes|\d+\s+parcelas?|\d+\s*x\s+de)/i.test(t);
 
   if (ehEmprestimoPego || ehEmprestimoDado || ehParcelado) {
     const tipo: 'pagar' | 'receber' = ehEmprestimoDado ? 'receber' : 'pagar';
 
     // Parcelas
     let totalParcelas = 1;
+    let valorParcela: number | null = null;
+    let valorTotal = valor;
+
     const nx = t.match(/\b(?:em\s+)?(\d+)\s*x\b/i);
     const nvz = t.match(/\b(\d+)\s+vezes\b/i);
     const nparc = t.match(/\b(\d+)\s+parcelas?\b/i);
     if (nx) totalParcelas = parseInt(nx[1], 10);
     else if (nvz) totalParcelas = parseInt(nvz[1], 10);
     else if (nparc) totalParcelas = parseInt(nparc[1], 10);
+
     if (/\b(uma|1)\s+vez(es)?\b|\bà\s+vista\b|\bsem\s+dividir\b/i.test(t)) totalParcelas = 1;
+
+    // "no mínimo 200 por mês" / "pagar 200 por mês" → 200 é o valor da parcela,
+    // NÃO o total. O total precisa ser outro número na frase (ex: "Peguei 800").
+    const minPorMes = t.match(/\b(?:no\s+m[íi]nimo|pelo\s+menos|parcela\s+de|de)\s+(\d+(?:[,\.]\d+)?)\s*(?:por\s+(?:m[êe]s|mes|semana|semanal|ano|anual)|\/\s*(?:m[êe]s|mes|semana|semanal|ano|anual))/i);
+    if (minPorMes && totalParcelas === 1) {
+      valorParcela = parseFloat(minPorMes[1].replace(',', '.'));
+      // Pega TODOS os números razoáveis da frase
+      const todosNumeros = [...t.matchAll(/(?:R\$\s*)?(\d{1,3}(?:\.\d{3})*|\d+)(?:[,\.]\d{2})?/g)]
+        .map((m) => parseFloat(m[1].replace(/\./g, '').replace(',', '.')))
+        .filter((n) => isFinite(n) && n > 0);
+      // O valor total é o maior número (geralmente vem antes do "mínimo X por mês")
+      // Ou o primeiro número, se houver só dois e o segundo é a parcela
+      if (todosNumeros.length >= 2) {
+        // Heurística: se um dos números é múltiplo do outro, o maior é o total
+        const maior = Math.max(...todosNumeros);
+        valorTotal = maior;
+        valorParcela = todosNumeros.find((n) => n !== maior) ?? valorParcela;
+        // Calcula total de parcelas pelo ratio
+        const ratio = valorTotal / valorParcela;
+        if (ratio >= 1 && ratio <= 48 && Math.abs(ratio - Math.round(ratio)) < 0.01) {
+          totalParcelas = Math.round(ratio);
+        } else {
+          totalParcelas = Math.ceil(ratio);
+        }
+      }
+    }
 
     // Recorrência
     let recorrencia: 'unica' | 'semanal' | 'mensal' | 'anual' = 'mensal';
