@@ -78,14 +78,49 @@ export async function POST(req: NextRequest) {
     body?.data?.key?.instance ??
     undefined;
 
-  // === ÁUDIO: se for audioMessage com base64, transcreve e usa como texto ===
-  // iOS às vezes envia em ephemeralMessage.message.audioMessage; cobre os dois.
+  // === ÁUDIO: se for audioMessage, transcreve e usa como texto ===
+  // Caminho 1 (preferido): webhook veio com `message.base64` (webhookBase64:true).
+  // Caminho 2 (fallback): webhookBase64 não está ativo na Evolution 2.3.7
+  //   (a config é silenciosamente ignorada nesse servidor). Aí baixamos
+  //   via `getBase64FromMediaMessage` que aceita o `message.key.id` e
+  //   retorna o conteúdo do áudio já descriptografado.
   const audioMsg =
     message?.audioMessage ??
     message?.ephemeralMessage?.message?.audioMessage ??
     null;
   if (audioMsg && !texto) {
-    const audioBase64: string | undefined = message?.base64 ?? message?.ephemeralMessage?.message?.base64;
+    let audioBase64: string | undefined =
+      message?.base64 ?? message?.ephemeralMessage?.message?.base64;
+
+    // Caminho 2: busca o base64 via API da Evolution
+    if (!audioBase64 && messageId && instanceFromPayload) {
+      try {
+        console.log(`[webhook] baixando áudio via getBase64FromMediaMessage (id=${messageId})`);
+        const cfg = await import('@/lib/evolution').then((m) =>
+          m.evolutionGlobalConfig()
+        );
+        const r = await fetch(
+          `${cfg.baseUrl}/chat/getBase64FromMediaMessage/${instanceFromPayload}`,
+          {
+            method: 'POST',
+            headers: { apikey: cfg.apiKey, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              message: { key: { id: messageId }, messageType: 'audioMessage' },
+            }),
+            signal: AbortSignal.timeout(30_000),
+          }
+        );
+        if (r.ok) {
+          const j = (await r.json()) as { base64?: string };
+          audioBase64 = j.base64;
+        } else {
+          console.warn(`[webhook] getBase64FromMediaMessage HTTP ${r.status}`);
+        }
+      } catch (e) {
+        console.error('[webhook] erro ao baixar áudio:', e);
+      }
+    }
+
     if (audioBase64) {
       const mimeType = audioMsg.mimetype ?? 'audio/ogg';
       console.log(`[webhook] transcrevendo áudio (${audioMsg.seconds ?? '?'}s, ${mimeType})`);
@@ -93,9 +128,7 @@ export async function POST(req: NextRequest) {
       const transcricao = await transcreverAudio(audioBase64, mimeType);
       if (transcricao) {
         console.log(`[webhook] transcrição: "${transcricao.slice(0, 80)}"`);
-        // Substitui o texto pela transcrição
         Object.assign(message, { conversation: transcricao, __transcribed: true });
-        // ack da transcrição chegou, deixa ele sair antes
         await ackPromise;
       } else {
         await ackPromise;
@@ -103,10 +136,8 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ ok: true, skipped: 'transcribe_failed' });
       }
     } else {
-      // Áudio sem base64: webhook não foi configurado com base64:true OU áudio
-      // muito antigo. Avisa o usuário pra reenviar o webhook.
-      console.warn('[webhook] audioMessage sem base64 — webhook precisa de webhook_base64=true');
-      await safeSend(remoteJid, '⚠️ Áudio sem mídia anexada. Reconfigure o webhook com base64:true.', instanceFromPayload);
+      console.warn('[webhook] audioMessage sem base64 (webhook + fallback falharam)');
+      await safeSend(remoteJid, '⚠️ Não consegui baixar o áudio. Tente reenviar.', instanceFromPayload);
       return NextResponse.json({ ok: true, skipped: 'no_audio_base64' });
     }
   }
