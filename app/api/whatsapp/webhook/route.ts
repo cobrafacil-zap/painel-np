@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { parseMensagem } from '@/modules/financeiro/lib/parser-mensagem';
 import { responderConsulta } from '@/modules/financeiro/lib/consultas';
+import { executarAcao } from '@/modules/financeiro/lib/acoes';
 import { evolutionEnviarTexto } from '@/lib/evolution';
 import { formatBRL, todayISO } from '@/lib/utils';
 import type { FinanceRecord } from '@/lib/types';
@@ -153,6 +154,13 @@ export async function POST(req: NextRequest) {
     const result = await responderConsulta(userId, parsed);
     await safeSend(remoteJid, result.reply);
     return NextResponse.json({ ok: true, intent: 'consulta' });
+  }
+
+  if (parsed.intent === 'acao') {
+    const a = parsed as Extract<typeof parsed, { intent: 'acao' }>;
+    const result = await executarAcao(userId, a.acao, a.alvo);
+    await safeSend(remoteJid, result.reply);
+    return NextResponse.json({ ok: true, intent: 'acao', deleted: result.deleted ?? 0 });
   }
 
   return NextResponse.json({ ok: true, skipped: true });

@@ -27,6 +27,12 @@ export type ParsedIntent =
       categoria: string | null;
     }
   | {
+      intent: 'acao';
+      confidence: number;
+      acao: 'apagar_ultimo' | 'apagar_categoria';
+      alvo: string | null; // categoria alvo ou null = mais recente
+    }
+  | {
       intent: 'outro';
       confidence: number;
     };
@@ -60,11 +66,12 @@ pix | cartao_credito | cartao_debito | dinheiro | boleto | transferencia
 INTENÇÕES:
 - "lancamento": quando o usuário REGISTRA algo novo. Ex: "gastei 50 no mercado", "recebi 1500 de freelance".
 - "consulta": quando o usuário PERGUNTA algo. Ex: "quanto gastei esse mês?", "qual meu saldo?".
+- "acao": quando o usuário quer APAGAR/REMOVER um lançamento. Ex: "apagar último", "remover o gasto do posto".
 - "outro": cumprimentos ("oi", "obrigado"), dúvidas genéricas, pedidos sem dados suficientes.
 
 SAÍDA (JSON estrito, nada fora disso):
 {
-  "intent": "lancamento" | "consulta" | "outro",
+  "intent": "lancamento" | "consulta" | "acao" | "outro",
   "confidence": number 0..1,
   // se intent=lancamento:
   "type": "gasto" | "receita",
@@ -76,7 +83,10 @@ SAÍDA (JSON estrito, nada fora disso):
   // se intent=consulta:
   "tipo": "gastos" | "receitas" | "saldo" | "top_categoria",
   "periodo": "hoje" | "semana" | "mes" | "mes_passado" | "tudo",
-  "categoria": string | null
+  "categoria": string | null,
+  // se intent=acao:
+  "acao": "apagar_ultimo" | "apagar_categoria",
+  "alvo": string | null
 }
 
 EXEMPLOS:
@@ -114,6 +124,18 @@ EXEMPLOS:
 "top categoria de gasto do mês" →
 {"intent":"consulta","confidence":0.95,"tipo":"top_categoria","periodo":"mes","categoria":null}
 
+"apagar último" →
+{"intent":"acao","confidence":0.95,"acao":"apagar_ultimo","alvo":null}
+
+"apaga o ultimo gasto" →
+{"intent":"acao","confidence":0.95,"acao":"apagar_ultimo","alvo":null}
+
+"remover o gasto do posto" →
+{"intent":"acao","confidence":0.92,"acao":"apagar_categoria","alvo":"posto"}
+
+"apagar tudo do mercado" →
+{"intent":"acao","confidence":0.93,"acao":"apagar_categoria","alvo":"mercado"}
+
 "oi" →
 {"intent":"outro","confidence":0.98}
 
@@ -124,6 +146,8 @@ REGRAS:
 - "gastei", "paguei", "comprei", "dei", "saquei" → tipo "gasto".
 - "recebi", "ganhei", "entrou", "caiu", "depositou" → tipo "receita".
 - Se encontrar verbo financeiro (gastei/paguei/recebi/ganhei/comprei) E um valor numérico na frase, é SEMPRE "lancamento", nunca "outro".
+- "apagar", "remover", "deletar", "tirar", "excluir" + ("último" | "ultimo") → acao="apagar_ultimo".
+- "apagar"/"remover"/"deletar" + nome de categoria (mercado, posto, uber…) → acao="apagar_categoria", alvo=<slug>.
 - "occurred_at" só preencha se o usuário disser explicitamente uma data ("ontem", "dia 5"). Para "hoje", devolva null (o sistema aplica hoje).
 - Não invente categoria se não tiver certeza — devolva null.
 - Não escreva markdown, comentários, nem nada fora do JSON.`;

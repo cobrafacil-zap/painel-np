@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { requireUser } from '@/lib/supabase/server';
 import { createClient } from '@/lib/supabase/server';
 import { LogoutButton } from './_components/logout-button';
-import { Wallet, LayoutDashboard, MessageCircle } from 'lucide-react';
+import { Wallet, LayoutDashboard, MessageCircle, Tags, ListChecks } from 'lucide-react';
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const { userId, email } = await requireUser();
@@ -26,9 +26,17 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         <NavLink href="/painel" icon={<LayoutDashboard className="w-4 h-4" />}>
           Visão geral
         </NavLink>
+
         <NavLink href="/financeiro" icon={<Wallet className="w-4 h-4" />}>
           Financeiro
         </NavLink>
+        <NavSubLink href="/financeiro/lancamentos" icon={<ListChecks className="w-3.5 h-3.5" />}>
+          Lançamentos
+        </NavSubLink>
+        <NavSubLink href="/financeiro/categorias" icon={<Tags className="w-3.5 h-3.5" />}>
+          Categorias
+        </NavSubLink>
+
         <NavLink href="/painel/whatsapp" icon={<MessageCircle className="w-4 h-4" />}>
           WhatsApp
         </NavLink>
@@ -48,6 +56,18 @@ function NavLink({ href, icon, children }: { href: string; icon: React.ReactNode
     <Link
       href={href}
       className="flex items-center gap-2 px-3 py-2 rounded-md text-sm text-zinc-300 hover:bg-bg-elevated hover:text-white"
+    >
+      {icon}
+      {children}
+    </Link>
+  );
+}
+
+function NavSubLink({ href, icon, children }: { href: string; icon: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <Link
+      href={href}
+      className="flex items-center gap-2 pl-9 pr-3 py-1.5 rounded-md text-xs text-zinc-400 hover:bg-bg-elevated hover:text-zinc-200"
     >
       {icon}
       {children}
