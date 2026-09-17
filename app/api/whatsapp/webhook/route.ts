@@ -158,12 +158,12 @@ export async function POST(req: NextRequest) {
   //    (a) por instance do payload (multi-tenant — caso normal)
   //    (b) fallback por whatsapp_group_jid (legacy Nicolas, instance fixa)
   const supabase = createServiceClient();
-  let profile: { id: string } | null = null;
+  let profile: { id: string; whatsapp_group_jid: string | null } | null = null;
 
   if (instanceFromPayload) {
     const r = await supabase
       .from('profiles')
-      .select('id')
+      .select('id, whatsapp_group_jid')
       .eq('evolution_instance_name', instanceFromPayload)
       .maybeSingle();
     profile = r.data;
@@ -172,7 +172,7 @@ export async function POST(req: NextRequest) {
   if (!profile) {
     const r = await supabase
       .from('profiles')
-      .select('id')
+      .select('id, whatsapp_group_jid')
       .eq('whatsapp_group_jid', remoteJid)
       .maybeSingle();
     profile = r.data;
@@ -182,6 +182,25 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, skipped: 'unlinked_group_or_instance' });
   }
   const userId = profile.id;
+
+  // FILTRO DE SEGURANÇA: só responde no grupo dedicado salvo no profile.
+  // Sem isso, qualquer mensagem recebida em qualquer conversa (incluindo
+  // grupos com amigos ou 1:1 com contatos como a Priscila) dispara o parser
+  // e o bot responde lá. Esse filtro é o ÚNICO ponto de defesa contra
+  // isso, então a regra é dura: remoteJid TEM que bater com o grupo salvo.
+  // Se o user ainda não salvou grupo, ignora tudo (evita "alguém mandou
+  // 'oi' e o bot respondeu 'Anotando…' em conversa particular").
+  if (!profile.whatsapp_group_jid) {
+    return NextResponse.json({ ok: true, skipped: 'no_group_configured' });
+  }
+  if (remoteJid !== profile.whatsapp_group_jid) {
+    return NextResponse.json({
+      ok: true,
+      skipped: 'not_target_group',
+      remoteJid,
+      expected: profile.whatsapp_group_jid,
+    });
+  }
 
   // 3. ACK VISUAL em paralelo com parse IA.
   // O ack sai imediatamente (Evolution tem fila interna, entrega em ms),
