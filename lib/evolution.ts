@@ -78,7 +78,8 @@ export async function evolutionQRCode(): Promise<string | null> {
 export async function evolutionEnviarTexto(
   destino: string,
   texto: string,
-  delayMs = 0
+  delayMs = 0,
+  timeoutMs = 45_000
 ): Promise<{ id: string; timestamp: number }> {
   const cfg = evolutionConfig();
   const res = await fetch(
@@ -88,7 +89,7 @@ export async function evolutionEnviarTexto(
       headers: { apikey: cfg.apiKey, "Content-Type": "application/json" },
       body: JSON.stringify({ number: destino, text: texto, delay: delayMs }),
       cache: "no-store",
-      signal: AbortSignal.timeout(120_000),
+      signal: AbortSignal.timeout(timeoutMs),
     }
   );
   if (!res.ok) {
