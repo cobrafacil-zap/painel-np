@@ -50,6 +50,8 @@ CATEGORIAS CONHECIDAS (use o slug quando souber; senão devolva null):
 - freelance (trabalho avulso)
 - salario (salário fixo, pagamento mensal)
 - investimentos (renda fixa, ações, cripto)
+- posto (gasolina, troca de óleo, lava jato)
+- cartao_credito (fatura cartão de crédito)
 - outros (se não encaixar)
 
 FORMAS DE PAGAMENTO (devolva o slug):

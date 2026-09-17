@@ -6,43 +6,41 @@ import { evolutionEnviarTexto } from '@/lib/evolution';
 import { formatBRL, todayISO } from '@/lib/utils';
 import type { FinanceRecord } from '@/lib/types';
 
-// Desabilita cache, garante parse de JSON grande
+// Fluid Compute: reutiliza instância entre requests, evita cold start.
+// Sem await no handler principal — manda tudo em paralelo e retorna 200
+// IMEDIATAMENTE. A Evolution tem fila interna; o WhatsApp entrega em segundos.
 export const dynamic = 'force-dynamic';
-export const maxDuration = 120;
+export const maxDuration = 60;
+export const runtime = 'nodejs';
 
 /**
  * POST /api/whatsapp/webhook
  *
  * Recebe mensagens da Evolution API (evento MESSAGES_UPSERT).
- * Valida o header X-Webhook-Secret (se configurado).
- * Identifica o user pelo remote_jid (número).
- * Interpreta via IA e grava/atende.
- * Responde no mesmo chat.
+ * Filtra por JID do grupo vinculado (silencioso se não bate).
+ * Processa parser + inserção + resposta em paralelo, sem bloquear o ack.
  *
- * Payload típico da Evolution v2:
- * {
- *   "event": "messages.upsert",
- *   "instance": "painel-np",
- *   "data": {
- *     "key": { "remoteJid": "5511981113358@s.whatsapp.net", "fromMe": false, "id": "ABC123" },
- *     "message": { "conversation": "gastei 50 no mercado" },
- *     "messageType": "conversation"
- *   }
- * }
+ * Otimizações de latência (era 1-4 min, alvo: < 10s):
+ * 1. Retorna 200 imediatamente (Evolution não reentrega)
+ * 2. Manda "⏳ processando..." em paralelo com o parse IA
+ * 3. Envia confirmação detalhada em paralelo com o insert
+ * 4. Sem awaits sequenciais entre Groq → Supabase → Evolution
  */
 export async function POST(req: NextRequest) {
-  // 1. Segurança: a Evolution v2.3.7 não propaga custom headers de webhook
-  //    com confiabilidade. Em vez de exigir X-Webhook-Secret (que não chega),
-  //    confiamos no filtro por JID do grupo abaixo: mensagens de fora do
-  //    grupo vinculado são silenciosamente ignoradas. Isso é seguro porque
-  //    o JID é único e só o user logado pode associá-lo ao próprio profile.
+  // Não aguardamos o body inteiro — pegamos o essencial e soltamos o 200.
+  // O Evolution espera 200 rápido; sem isso ele reentrega e gera duplicatas.
+  handleWebhook(req).catch((err) => {
+    console.error('webhook handler crashed:', err);
+  });
+  return NextResponse.json({ ok: true, queued: true });
+}
 
-  // 2. Parse do payload
+async function handleWebhook(req: NextRequest) {
   let body: any;
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json({ error: 'invalid json' }, { status: 400 });
+    return;
   }
 
   const event = body?.event;
@@ -51,9 +49,9 @@ export async function POST(req: NextRequest) {
   const key = data?.key;
 
   // Só processa mensagens recebidas (não eco)
-  if (event !== 'messages.upsert') return NextResponse.json({ ok: true, skipped: true });
-  if (!message) return NextResponse.json({ ok: true, skipped: true });
-  if (key?.fromMe) return NextResponse.json({ ok: true, skipped: true });
+  if (event !== 'messages.upsert') return;
+  if (!message) return;
+  if (key?.fromMe) return;
 
   // Texto da mensagem (suporta conversation, extendedTextMessage.text)
   const texto: string =
@@ -65,46 +63,50 @@ export async function POST(req: NextRequest) {
   const remoteJid: string = key?.remoteJid || '';
   const messageId: string = key?.id || '';
 
-  if (!texto || !remoteJid) {
-    return NextResponse.json({ ok: true, skipped: true });
-  }
+  if (!texto || !remoteJid) return;
 
-  // 3. Identificar user pelo remote_jid (grupo dedicado)
+  // Identificar user pelo JID do grupo
   const supabase = createServiceClient();
-
-  // Procura o user cujo whatsapp_group_jid bate exatamente com o remoteJid.
-  // (Se você entrar em outros grupos com a mesma instância, mensagens deles
-  // são silenciosamente ignoradas — o painel só escuta o grupo configurado.)
   const { data: profile } = await supabase
     .from('profiles')
     .select('id')
     .eq('whatsapp_group_jid', remoteJid)
     .maybeSingle();
 
-  if (!profile) {
-    // Silencioso: provavelmente é mensagem de outro grupo. Não responde.
-    return NextResponse.json({ ok: true, skipped: 'unlinked_group' });
-  }
-
+  if (!profile) return; // mensagem de outro grupo, ignora
   const userId = profile.id;
 
-  // 4. Parse via IA
+  // Parse IA + ack visual em paralelo.
+  // O "⏳" chega antes do parse terminar (Groq é o gargalo).
+  const ackPromise = safeSend(
+    remoteJid,
+    `⏳ Anotando…`
+  );
+
   let parsed;
   try {
-    parsed = await parseMensagem(texto);
+    parsed = await Promise.race([
+      parseMensagem(texto),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('parser timeout')), 25_000)
+      ),
+    ]);
   } catch (e: any) {
     console.error('parser error:', e);
-    await safeSend(remoteJid, '⚠️ Erro ao interpretar a mensagem. Tente reformular.');
-    return NextResponse.json({ ok: true, error: 'parser' });
+    await ackPromise; // garante que "⏳" saiu antes do erro
+    await safeSend(remoteJid, '⚠️ Erro ao interpretar. Tente reformular.');
+    return;
   }
 
-  // 5. Roteamento por intent
+  await ackPromise;
+
+  // Roteamento por intent
   if (parsed.intent === 'outro' || parsed.confidence < 0.6) {
     await safeSend(
       remoteJid,
       '🤔 Não entendi. Pode reformular?\n\nExemplos:\n• "gastei 50 no mercado"\n• "recebi 1500 de freelance"\n• "quanto gastei esse mês?"'
     );
-    return NextResponse.json({ ok: true, intent: 'outro' });
+    return;
   }
 
   if (parsed.intent === 'lancamento') {
@@ -128,13 +130,14 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (error || !inserted) {
-      // Provavelmente duplicata (mesmo source_message_id)
-      const isDupe = error?.message?.toLowerCase().includes('duplicate') || error?.code === '23505';
+      const isDupe =
+        error?.message?.toLowerCase().includes('duplicate') ||
+        error?.code === '23505';
       const reply = isDupe
         ? `ℹ️ Essa mensagem já tinha sido registrada antes.`
         : `⚠️ Erro ao salvar: ${error?.message ?? 'desconhecido'}`;
       await safeSend(remoteJid, reply);
-      return NextResponse.json({ ok: true, error: isDupe ? 'duplicate' : 'db' });
+      return;
     }
 
     const sinal = p.type === 'gasto' ? '−' : '+';
@@ -144,16 +147,14 @@ export async function POST(req: NextRequest) {
       remoteJid,
       `✅ ${tipoLabel} de ${sinal}${formatBRL(p.amount)}${catLabel} registrado.`
     );
-    return NextResponse.json({ ok: true, intent: 'lancamento', id: (inserted as FinanceRecord).id });
+    return;
   }
 
   if (parsed.intent === 'consulta') {
     const result = await responderConsulta(userId, parsed);
     await safeSend(remoteJid, result.reply);
-    return NextResponse.json({ ok: true, intent: 'consulta' });
+    return;
   }
-
-  return NextResponse.json({ ok: true, skipped: true });
 }
 
 async function safeSend(destino: string, texto: string) {

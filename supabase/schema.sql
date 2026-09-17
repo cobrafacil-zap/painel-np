@@ -180,6 +180,7 @@ begin
     (p_user_id, 'financeiro', 'freelance',     'Freelance',     'Briefcase',     '#22c55e', true),
     (p_user_id, 'financeiro', 'salario',       'Salário',       'Banknote',      '#16a34a', true),
     (p_user_id, 'financeiro', 'investimentos', 'Investimentos', 'TrendingUp',    '#0ea5e9', true),
+    (p_user_id, 'financeiro', 'posto',         'Posto',         'Fuel',          '#f97316', true),
     (p_user_id, 'financeiro', 'outros',        'Outros',        'Circle',        '#6b7280', true)
   on conflict (user_id, module_id, slug) do nothing;
 end $$;
