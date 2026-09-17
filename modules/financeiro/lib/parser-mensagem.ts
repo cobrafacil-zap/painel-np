@@ -103,6 +103,10 @@ EXEMPLOS DE LANÇAMENTO
 "coloquei 50 de gasolina" → {"intent":"lancamento","confidence":0.95,"type":"gasto","amount":50,"category":"posto","description":"gasolina","payment_method":null,"occurred_at":null}
 "comprei 30 de mercado" → {"intent":"lancamento","confidence":0.95,"type":"gasto","amount":30,"category":"mercado","description":"mercado","payment_method":null,"occurred_at":null}
 "paguei 80 de conta de luz" → {"intent":"lancamento","confidence":0.94,"type":"gasto","amount":80,"category":"moradia","description":"conta de luz","payment_method":null,"occurred_at":null}
+"tenho uma conta de internet de 135 reais" → {"intent":"lancamento","confidence":0.93,"type":"gasto","amount":135,"category":"assinaturas","description":"internet","payment_method":null,"occurred_at":null}
+"saiu 50 de gasolina" → {"intent":"lancamento","confidence":0.94,"type":"gasto","amount":50,"category":"posto","description":"gasolina","payment_method":null,"occurred_at":null}
+"é 80 de academia por mês" → {"intent":"lancamento","confidence":0.91,"type":"gasto","amount":80,"category":"saude","description":"academia","payment_method":null,"occurred_at":null}
+"custou 35 o almoço" → {"intent":"lancamento","confidence":0.95,"type":"gasto","amount":35,"category":"alimentacao","description":"almoço","payment_method":null,"occurred_at":null}
 "salário 7500 caiu" → {"intent":"lancamento","confidence":0.94,"type":"receita","amount":7500,"category":"salario","description":"salário","payment_method":null,"occurred_at":null}
 "recebi 100 do cliente" → {"intent":"lancamento","confidence":0.93,"type":"receita","amount":100,"category":"freelance","description":"cliente","payment_method":null,"occurred_at":null}
 "uber pro trabalho 25" → {"intent":"lancamento","confidence":0.93,"type":"gasto","amount":25,"category":"transporte","description":"uber pro trabalho","payment_method":null,"occurred_at":null}
@@ -173,7 +177,9 @@ REGRAS CRÍTICAS (NUNCA ESQUEÇA)
 • "emprestei"/"dei emprestado" → tipo=receber.
 • "faturei"/"comprei parcelado"/"parcelei" → tipo=pagar.
 • Datas relativas sem dia ("amanhã", "semana que vem", "mês que vem") → null (sistema calcula).
-• Se a frase tiver verbo financeiro (gastei/paguei/recebi/ganhei/comprei/peguei/emprestei) E um valor monetário, é "lancamento" OU "compromisso" — NUNCA "outro".
+• Se a frase tiver verbo financeiro (gastei/paguei/recebi/ganhei/comprei/peguei/emprestei/tirei/faturei/saiu/custou/foi/é/tenho/vou pagar) E um valor monetário, é "lancamento" OU "compromisso" — NUNCA "outro".
+• "tenho uma conta de X de N reais" / "pago N de X" / "X tá N" / "X custa N" → lancamento gasto recorrente (categoria conforme X: internet/luz/água = moradia, academia = saude, etc).
+• CONTAS FIXAS MENSais (internet, luz, água, gás, telefone, aluguel, academia, streaming) → categoria "moradia" pra utilidades da casa, "assinaturas" pra serviços digitais (Netflix, Spotify), "saude" pra plano de saúde e academia. Mesmo sem verbo explícito, "conta de X de N" é gasto.
 • CONFIDENCE: 0.95+ para casos claros. 0.7-0.9 se tem ambiguidade. <0.7 só se realmente não dá pra saber.
 • NÃO escreva markdown, comentários, explicações — SOMENTE o JSON.
 • NÃO use aspas escapadas inválidas. Use aspas duplas normais.
