@@ -27,6 +27,7 @@ export default function WhatsAppPage() {
   const [setupWebhookLoading, setSetupWebhookLoading] = useState(false);
   const [webhookConfigured, setWebhookConfigured] = useState(false);
   const [resetting, setResetting] = useState(false);
+  const [refreshingQR, setRefreshingQR] = useState(false);
   const [loading, setLoading] = useState(true);
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -177,6 +178,20 @@ export default function WhatsAppPage() {
     }
   }
 
+  async function refreshQR() {
+    setRefreshingQR(true);
+    setError(null);
+    try {
+      const r = await fetch('/api/evolution/refresh-qr', { method: 'POST' }).then((r) => r.json());
+      if (!r?.ok || !r?.qr) throw new Error(r?.error ?? 'QR não veio');
+      setData((prev) => prev ? { ...prev, qr: r.qr } : prev);
+    } catch (e: any) {
+      setError(`QR: ${e?.message ?? 'erro'}`);
+    } finally {
+      setRefreshingQR(false);
+    }
+  }
+
   const isOpen = data?.status?.state === 'open';
   const showQR = !!data?.qr && !isOpen;
 
@@ -260,6 +275,14 @@ export default function WhatsAppPage() {
                 <p className="text-xs text-zinc-500 text-center">
                   Atualizando a cada 3 segundos…
                 </p>
+                <button
+                  onClick={refreshQR}
+                  disabled={refreshingQR}
+                  className="btn-ghost text-xs inline-flex items-center gap-1 mx-auto"
+                >
+                  <RefreshCw className={`w-3 h-3 ${refreshingQR ? 'animate-spin' : ''}`} />
+                  {refreshingQR ? 'Atualizando…' : 'Atualizar QR agora'}
+                </button>
               </div>
             )}
 

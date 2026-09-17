@@ -18,6 +18,7 @@ export default function OnboardingWhatsAppPage() {
   const [data, setData] = useState<StatusResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [provisioning, setProvisioning] = useState(false);
+  const [refreshingQR, setRefreshingQR] = useState(false);
   const [loading, setLoading] = useState(true);
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -78,7 +79,22 @@ export default function OnboardingWhatsAppPage() {
 
   async function refreshStatus() {
     const r = await fetch('/api/evolution/status').then((r) => r.json()).catch(() => null);
-    if (r && !r.error) setData(r as StatusResponse);
+    if (r) setData(r as StatusResponse);
+  }
+
+  async function refreshQR() {
+    setRefreshingQR(true);
+    setError(null);
+    try {
+      const r = await fetch('/api/evolution/refresh-qr', { method: 'POST' }).then((r) => r.json());
+      if (!r?.ok || !r?.qr) throw new Error(r?.error ?? 'QR não veio');
+      // Atualiza só o campo qr sem esperar o polling
+      setData((prev) => prev ? { ...prev, qr: r.qr } : prev);
+    } catch (e: any) {
+      setError(`QR: ${e?.message ?? 'erro'}`);
+    } finally {
+      setRefreshingQR(false);
+    }
   }
 
   function startPolling() {
@@ -165,6 +181,14 @@ export default function OnboardingWhatsAppPage() {
                 <p className="text-xs text-zinc-500">
                   QR atualiza a cada 3 segundos automaticamente.
                 </p>
+                <button
+                  onClick={refreshQR}
+                  disabled={refreshingQR}
+                  className="btn-ghost text-xs inline-flex items-center gap-1"
+                >
+                  <RefreshCw className={`w-3 h-3 ${refreshingQR ? 'animate-spin' : ''}`} />
+                  {refreshingQR ? 'Atualizando…' : 'Atualizar QR agora'}
+                </button>
                 <p className="text-xs text-zinc-600">
                   Instância: <code>{data.instanceName}</code>
                 </p>
