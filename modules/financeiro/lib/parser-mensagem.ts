@@ -237,10 +237,25 @@ function tentarParseLocal(texto: string): ParsedIntent | null {
   if (t.length > 200) return null;
 
   // === Detectar valor monetário (suporta R$, ponto-e-vírgula BR) ===
-  // Procura número com formato R$/valor OU número "puro" razoável
-  const valorMatch = t.match(/(?:R\$\s*)?(\d{1,3}(?:\.\d{3})*|\d+)(?:[,\.]\d{2})?/);
+  // IMPORTANTE: ordem das alternativas importa — o motor de regex do JS
+  // pega a PRIMEIRA que casar, então colocamos primeiro o "número inteiro
+  // com 4+ dígitos" (ex: "1650") pra ele não cair no "1.650" como se fosse
+  // grupo de milhar mal formado, e nem parar nos primeiros 3 dígitos ("165").
+  // Estratégia: tentar do mais específico pro mais genérico.
+  // O grupo de captura inclui a parte decimal (,dd ou .dd) pra não perder centavos.
+  const valorMatch =
+    // 1) R$ + número (1-3 dígitos com pontos + ,centavos OU inteiro)
+    t.match(/R\$\s*(\d{1,3}(?:\.\d{3})+(?:,\d{2})?|\d{4,}(?:[,\.]\d{2})?|\d{1,3}(?:[,\.]\d{2})?)/) ||
+    // 2) Número "puro" com 4+ dígitos seguidos (ex: "1650", "1234,56")
+    t.match(/\b(\d{4,}(?:[,\.]\d{2})?)\b/) ||
+    // 3) Número com pontos de milhar (ex: "1.650" ou "1.650,50")
+    t.match(/\b(\d{1,3}(?:\.\d{3})+(?:,\d{2})?)\b/) ||
+    // 4) Número simples com 1-3 dígitos (com ou sem centavos: "50", "1,65")
+    t.match(/\b(\d{1,3}(?:[,\.]\d{2})?)\b/);
+
   if (!valorMatch) return null;
   let valorStr = valorMatch[1];
+  // Se tem 2 dígitos depois de , ou . é centavos. Remove pontos de milhar.
   let valor = parseFloat(valorStr.replace(/\./g, '').replace(',', '.'));
   if (!isFinite(valor) || valor <= 0 || valor > 1_000_000) return null;
 
