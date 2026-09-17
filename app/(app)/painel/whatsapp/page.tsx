@@ -68,11 +68,15 @@ export default function WhatsAppPage() {
 
   async function refreshStatus() {
     const r = await fetch('/api/evolution/status').then((r) => r.json()).catch(() => null);
+    // IMPORTANTE: mesmo com `error` setado, ainda pode ter payload útil
+    // (ex: 404 da Evolution retorna {error, instanceName, status, needsRecreate}).
+    // Sempre atualiza data se vier payload, e adiciona error como aviso.
+    if (r) {
+      setData(r as StatusResponse);
+    }
     if (r?.error) {
       setError(r.error);
-      return;
     }
-    if (r) setData(r as StatusResponse);
   }
 
   async function refreshGroups() {
