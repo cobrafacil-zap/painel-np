@@ -96,6 +96,15 @@ EXEMPLOS:
 "salário de 7500 caiu hoje" →
 {"intent":"lancamento","confidence":0.94,"type":"receita","amount":7500,"category":"salario","description":"salário","payment_method":null,"occurred_at":null}
 
+"Gastei 13 no posto de gasolina" →
+{"intent":"lancamento","confidence":0.95,"type":"gasto","amount":13,"category":"posto","description":"posto de gasolina","payment_method":null,"occurred_at":null}
+
+"gastei 12 de agua e chocolate no posto" →
+{"intent":"lancamento","confidence":0.93,"type":"gasto","amount":12,"category":"posto","description":"agua e chocolate no posto","payment_method":null,"occurred_at":null}
+
+"coloquei 50 de gasolina" →
+{"intent":"lancamento","confidence":0.95,"type":"gasto","amount":50,"category":"posto","description":"gasolina","payment_method":null,"occurred_at":null}
+
 "quanto gastei esse mês?" →
 {"intent":"consulta","confidence":0.99,"tipo":"gastos","periodo":"mes","categoria":null}
 
@@ -111,7 +120,10 @@ EXEMPLOS:
 REGRAS:
 - amount SEMPRE positivo (a definição de gasto/receita está em "type").
 - Se a frase tiver vários valores (ex: "gastei 50 e recebi 100"), registre o primeiro lançamento só.
-- Se você não tem certeza absoluta do intent, devolva "outro" com confidence baixa.
+- "posto" cobre QUALQUER gasto em posto de gasolina: gasolina, álcool, troca de óleo, lava-jato, lanche no posto. SEMPRE use essa categoria se a frase mencionar "posto", "gasolina", "combustível", "abasteci".
+- "gastei", "paguei", "comprei", "dei", "saquei" → tipo "gasto".
+- "recebi", "ganhei", "entrou", "caiu", "depositou" → tipo "receita".
+- Se encontrar verbo financeiro (gastei/paguei/recebi/ganhei/comprei) E um valor numérico na frase, é SEMPRE "lancamento", nunca "outro".
 - "occurred_at" só preencha se o usuário disser explicitamente uma data ("ontem", "dia 5"). Para "hoje", devolva null (o sistema aplica hoje).
 - Não invente categoria se não tiver certeza — devolva null.
 - Não escreva markdown, comentários, nem nada fora do JSON.`;
