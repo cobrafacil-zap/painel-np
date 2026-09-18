@@ -201,6 +201,7 @@ LEMBRE-SE: você DEVE devolver um JSON válido E SOMENTE JSON. Sem "Aqui está o
 // Tarefas). Mantido como function declaration local só por compat —
 // o conteúdo vive em `@/lib/numeros`.
 import { numerosPorExtensoParaDigitos } from '@/lib/numeros';
+import { carregarPadroesParaContexto } from '@/lib/financeiro/patterns';
 
 /**
  * Converte números por extenso (PT-BR) pra dígitos. Implementação vive
@@ -519,8 +520,11 @@ function getGroq() {
 /**
  * Parser principal: tenta regex local primeiro (rápido e determinístico).
  * Se não bater com confiança, chama o Groq.
+ *
+ * `opts.userId` é opcional — quando passado, injeta memória de padrões
+ * (#1) no system prompt do Groq.
  */
-export async function parseMensagem(texto: string): Promise<ParsedIntent> {
+export async function parseMensagem(texto: string, opts?: { userId?: string }): Promise<ParsedIntent> {
   // 0. Normaliza: converte números por extenso (vindos de transcrição de
   // áudio Whisper) pra dígitos. Sem isso, "gastei cento e trinta e cinco"
   // cai no Groq e tem chance de errar a interpretação.
@@ -533,11 +537,18 @@ export async function parseMensagem(texto: string): Promise<ParsedIntent> {
     return local;
   }
 
+  // 1.5. Injeta memória de padrões do user no system prompt (#1)
+  let systemPrompt = SYSTEM_PROMPT;
+  if (opts?.userId) {
+    const contexto = await carregarPadroesParaContexto(opts.userId);
+    systemPrompt = SYSTEM_PROMPT + contexto;
+  }
+
   // 2. Cai pro Groq
   const groq = getGroq();
   const { text } = await generateText({
     model: groq('llama-3.1-8b-instant'), // mais rápido e determinístico que gpt-oss-120b
-    system: SYSTEM_PROMPT,
+    system: systemPrompt,
     prompt: textoNormalizado,
     temperature: 0.05,
     maxTokens: 600,

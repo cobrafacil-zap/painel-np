@@ -302,7 +302,7 @@ export async function POST(req: NextRequest) {
       ]);
     } else if (modulo === 'financeiro') {
       parsed = await Promise.race([
-        parseMensagem(texto),
+        parseMensagem(texto, { userId }),
         new Promise<never>((_, reject) =>
           setTimeout(() => reject(new Error('parser timeout')), 25_000)
         ),
@@ -312,7 +312,7 @@ export async function POST(req: NextRequest) {
       // perguntas, etc.). Se for tarefa_ambigua, o financeiro devolve intent
       // 'outro' e respondemos com a mensagem padrão.
       parsed = await Promise.race([
-        parseMensagem(texto),
+        parseMensagem(texto, { userId }),
         new Promise<never>((_, reject) =>
           setTimeout(() => reject(new Error('parser timeout')), 25_000)
         ),

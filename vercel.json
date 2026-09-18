@@ -18,6 +18,10 @@
     {
       "path": "/api/cron/disparar-lembretes",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/calcular-padroes",
+      "schedule": "0 4 * * *"
     }
   ]
 }
