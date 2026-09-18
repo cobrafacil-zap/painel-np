@@ -14,6 +14,7 @@ import { normalizarAcentos } from '@/lib/acentos';
 import { formatBRL, todayISO } from '@/lib/utils';
 import { getSession, setContext, clearContext } from '@/lib/whatsapp/session';
 import { detectarDuplicata, formatarMensagemDuplicata } from '@/lib/financeiro/dedup';
+import { extrairEntidades } from '@/lib/nlp/entities';
 import type { FinanceRecord } from '@/lib/types';
 
 // Fluid Compute: roda em São Paulo (gru1), perto do Contabo.
@@ -611,6 +612,9 @@ export async function POST(req: NextRequest) {
     const catLabel = p.category ? ` em '${p.category}'` : '';
     const confirmacao = `✅ ${tipoLabel} de ${sinal}${formatBRL(p.amount)}${catLabel} registrado.`;
 
+    // NER leve (#6): extrai entidades pra filtro futuro
+    const entities = extrairEntidades(texto);
+
     // INSERT e ENVIO em paralelo: o usuário recebe a confirmação junto com
     // (ou logo após) o commit no banco. Sem serializar.
     const [insertResult] = await Promise.all([
@@ -627,7 +631,11 @@ export async function POST(req: NextRequest) {
           occurred_at: p.occurred_at ?? todayISO(),
           source: 'whatsapp',
           source_message_id: messageId,
-          metadata: { remote_jid: remoteJid, parsed_confidence: p.confidence },
+          metadata: {
+            remote_jid: remoteJid,
+            parsed_confidence: p.confidence,
+            entities, // #6
+          },
         })
         .select()
         .single(),

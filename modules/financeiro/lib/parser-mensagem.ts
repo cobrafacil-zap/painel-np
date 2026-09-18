@@ -544,6 +544,11 @@ export async function parseMensagem(texto: string, opts?: { userId?: string }): 
     systemPrompt = SYSTEM_PROMPT + contexto;
   }
 
+  // 1.6. NER leve (#6) — extrai entidades e injeta no prompt
+  const { extrairEntidades, formatarEntidadesParaPrompt } = await import('@/lib/nlp/entities');
+  const ents = extrairEntidades(texto);
+  systemPrompt += formatarEntidadesParaPrompt(ents);
+
   // 2. Cai pro Groq
   const groq = getGroq();
   const { text } = await generateText({

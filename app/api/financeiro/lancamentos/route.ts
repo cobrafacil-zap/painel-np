@@ -21,6 +21,8 @@ export async function GET(req: NextRequest) {
   const to = searchParams.get('to');
   const type = searchParams.get('type'); // 'gasto' | 'receita' | null
   const category = searchParams.get('category');
+  const pessoa = searchParams.get('pessoa'); // #6 — filtro NER
+  const fornecedor = searchParams.get('fornecedor'); // #6 — filtro NER
   const limit = Math.min(parseInt(searchParams.get('limit') ?? '500', 10), 1000);
 
   const supabase = await createClient();
@@ -38,9 +40,33 @@ export async function GET(req: NextRequest) {
   if (type) q = q.eq('type', type);
   if (category) q = q.eq('category', category);
 
+  // #6: filtro por entidades extraídas (NER)
+  // O Supabase não tem filtro nativo em jsonb[] — então buscamos e
+  // filtramos em memória. Pra <1000 registros (limit máximo) é barato.
   const { data, error } = await q;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ records: data ?? [] });
+
+  let filtered = data ?? [];
+  if (pessoa || fornecedor) {
+    filtered = filtered.filter((r: any) => {
+      const ents = r.metadata?.entities ?? {};
+      if (pessoa && !Array.isArray(ents.pessoas)) return false;
+      if (fornecedor && !Array.isArray(ents.fornecedores)) return false;
+      const matchPessoa = pessoa
+        ? (ents.pessoas as string[]).some(
+            (n) => n.toLowerCase() === pessoa.toLowerCase(),
+          )
+        : true;
+      const matchFornecedor = fornecedor
+        ? (ents.fornecedores as string[]).some(
+            (n) => n.toLowerCase() === fornecedor.toLowerCase(),
+          )
+        : true;
+      return matchPessoa && matchFornecedor;
+    });
+  }
+
+  return NextResponse.json({ records: filtered });
 }
 
 export async function POST(req: NextRequest) {
