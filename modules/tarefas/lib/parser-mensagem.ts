@@ -180,18 +180,18 @@ function tentarParseLocalTarefa(texto: string): TarefaParsedIntent | null {
   // data, que vira tarefa_ambigua sem_data quando Groq processa.
   if (!temMarcadorForte && !temDataOuHora) return null;
 
-  // Recorrência
+  // Recorrência (usa tl normalizado pra evitar \b falhar com acentos)
   let recorrencia: 'semanal' | 'mensal' | null = null;
-  if (/\b(toda\s+semana|semanalmente|toda\s+\w+feira|todo\s+m[êe]s|mensalmente|m[êe]s\s+a\s+m[êe]s)\b/i.test(t)) {
-    if (/semanal|semana|feira/i.test(t)) recorrencia = 'semanal';
-    else if (/mensal|m[êe]s/i.test(t)) recorrencia = 'mensal';
+  if (/\b(toda\s+semana|semanalmente|toda\s+\w+feira|todo\s+mes|mensalmente|mes\s+a\s+mes)\b/i.test(tl)) {
+    if (/semanal|semana|feira/i.test(tl)) recorrencia = 'semanal';
+    else if (/mensal|mes/i.test(tl)) recorrencia = 'mensal';
   }
 
-  // Hora
+  // Hora (tl normalizado: 'as 10h' em vez de 'às 10h')
   let hora_token: TokenHora | null = null;
   let horaStr: string | null = null;
-  const hm = t.match(/[àa]s?\s+(\d{1,2})h(?:(\d{2}))?/i);
-  const hm2 = t.match(/[àa]s?\s+(\d{1,2}):(\d{2})/);
+  const hm = tl.match(/as?\s+(\d{1,2})h(?:(\d{2}))?/i);
+  const hm2 = tl.match(/as?\s+(\d{1,2}):(\d{2})/);
   if (hm) {
     const h = parseInt(hm[1], 10);
     const mm = hm[2] ? parseInt(hm[2], 10) : 0;
@@ -207,81 +207,86 @@ function tentarParseLocalTarefa(texto: string): TarefaParsedIntent | null {
     const mm = parseInt(hm2[2], 10);
     hora_token = `${h}:${pad2(mm)}` as TokenHora;
     horaStr = `${pad2(h)}:${pad2(mm)}:00`;
-  } else if (/\bde\s+manh[ãa]\b/i.test(t)) {
+  } else if (/\bde\s+manha\b/i.test(tl)) {
     hora_token = 'DE_MANHA';
     horaStr = '09:00:00';
-  } else if (/\bde\s+tarde\b/i.test(t)) {
+  } else if (/\bde\s+tarde\b/i.test(tl)) {
     hora_token = 'DE_TARDE';
     horaStr = '14:00:00';
-  } else if (/\bde\s+noite\b/i.test(t)) {
+  } else if (/\bde\s+noite\b/i.test(tl)) {
     hora_token = 'DE_NOITE';
     horaStr = '20:00:00';
   }
 
   // Data
+  // IMPORTANTE: usa `tl` (normalizado pelo normalizarAcentos) porque
+  // `\b` em V8 sem flag `/u` não casa antes/depois de letras acentuadas
+  // Latin-1. Ver lib/acentos.ts.
   let data_token: TokenData | null = null;
-  if (/\bhoje\b/i.test(t)) data_token = 'HOJE';
-  else if (/\bamanh[ãa]\b/i.test(t)) data_token = 'AMANHA';
-  else if (/\bsemana\s+que\s+vem\b/i.test(t)) data_token = 'SEMANA_QUE_VEM';
-  else if (/\bm[êe]s\s+que\s+vem\b/i.test(t)) data_token = 'MES_QUE_VEM';
-  else if (/\bfim\s+(?:do\s+m[êe]s|d[eo]\s+m[êe]s)\b/i.test(t)) data_token = 'FIM_MES';
-  else if (/\bsegunda\b/i.test(t)) data_token = 'SEGUNDA';
-  else if (/\bter[çc]a\b/i.test(t)) data_token = 'TERCA';
-  else if (/\bquarta\b/i.test(t)) data_token = 'QUARTA';
-  else if (/\bquinta\b/i.test(t)) data_token = 'QUINTA';
-  else if (/\bsexta\b/i.test(t)) data_token = 'SEXTA';
-  else if (/\bs[áa]bado\b/i.test(t)) data_token = 'SABADO';
-  else if (/\bdomingo\b/i.test(t)) data_token = 'DOMINGO';
+  if (/\bhoje\b/i.test(tl)) data_token = 'HOJE';
+  else if (/\bamanha\b/i.test(tl)) data_token = 'AMANHA';
+  else if (/\bsemana\s+que\s+vem\b/i.test(tl)) data_token = 'SEMANA_QUE_VEM';
+  else if (/\bmes\s+que\s+vem\b/i.test(tl)) data_token = 'MES_QUE_VEM';
+  else if (/\bfim\s+(?:do|do|de)\s+mes\b/i.test(tl)) data_token = 'FIM_MES';
+  else if (/\bsegunda\b/i.test(tl)) data_token = 'SEGUNDA';
+  else if (/\bterca\b/i.test(tl)) data_token = 'TERCA';
+  else if (/\bquarta\b/i.test(tl)) data_token = 'QUARTA';
+  else if (/\bquinta\b/i.test(tl)) data_token = 'QUINTA';
+  else if (/\bsexta\b/i.test(tl)) data_token = 'SEXTA';
+  else if (/\bsabado\b/i.test(tl)) data_token = 'SABADO';
+  else if (/\bdomingo\b/i.test(tl)) data_token = 'DOMINGO';
   else {
-    const daqui = t.match(/\bdaqui\s+a\s+(\d{1,2})\s+dias?\b/i);
+    const daqui = tl.match(/\bdaqui\s+a\s+(\d{1,2})\s+dias?\b/i);
     if (daqui) {
       const n = parseInt(daqui[1], 10);
       data_token = `DAQUI_${n}_DIAS` as TokenData;
     } else {
-      const prox = t.match(/\bpr[óo]ximo\s+dia\s+(\d{1,2})\b/i);
+      const prox = tl.match(/\bproximo\s+dia\s+(\d{1,2})\b/i);
       if (prox) {
         data_token = `PROX_DIA_${parseInt(prox[1], 10)}` as TokenData;
       } else {
-        const dia = t.match(/\bdia\s+(\d{1,2})\b/i);
+        const dia = tl.match(/\bdia\s+(\d{1,2})\b/i);
         if (dia) data_token = `DIA_${parseInt(dia[1], 10)}` as TokenData;
       }
     }
   }
 
-  // Categoria — só se palavra-chave óbvia
+  // Categoria — só se palavra-chave óbvia (usa tl normalizado)
   let categoria: string | null = null;
-  if (/\b(cliente|reuni[ãa]o|projeto|campanha|escrit[óo]rio|empresa|trabalho)\b/i.test(t)) {
+  if (/\b(cliente|reuniao|projeto|campanha|escritorio|empresa|trabalho)\b/i.test(tl)) {
     categoria = 'trabalho';
-  } else if (/\b(m[ãa]e|pai|esposa|filho|amigo|fam[íi]lia)\b/i.test(t)) {
+  } else if (/\b(mae|pai|esposa|filho|amigo|familia)\b/i.test(tl)) {
     categoria = 'pessoal';
-  } else if (/\b(m[ée]dico|dentista|academia|exame|rem[ée]dio|sa[úu]de)\b/i.test(t)) {
+  } else if (/\b(medico|dentista|academia|exame|remedio|saude)\b/i.test(tl)) {
     categoria = 'saude';
-  } else if (/\b(faculdade|curso|aula|livro|prova|estudo)\b/i.test(t)) {
+  } else if (/\b(faculdade|curso|aula|livro|prova|estudo)\b/i.test(tl)) {
     categoria = 'estudo';
-  } else if (/\b(banco|conta|boleto|investimento|financeiro)\b/i.test(t)) {
+  } else if (/\b(banco|conta|boleto|investimento|financeiro)\b/i.test(tl)) {
     categoria = 'financeiro';
   }
 
-  // Prioridade
+  // Prioridade (usa tl normalizado)
   let prioridade: 'baixa' | 'media' | 'alta' = 'media';
-  if (/\b(urgente|important|cr[íi]tico|asap|imediato|agora)\b/i.test(t)) prioridade = 'alta';
-  else if (/\b(quando\s+der|quando\s+puder|sem\s+pressa)\b/i.test(t)) prioridade = 'baixa';
+  if (/\b(urgente|importante|critico|asap|imediato|agora)\b/i.test(tl)) prioridade = 'alta';
+  else if (/\b(quando\s+der|quando\s+puder|sem\s+pressa)\b/i.test(tl)) prioridade = 'baixa';
 
   // Título — pega substantivo principal. Heurística simples:
   // remove marcadores (tenho que, preciso, vou) + remove data/hora + remove
   // trecho temporal e usa o resto.
-  let tituloLimpo = t
+  // Limpa o título removendo marcadores e trechos temporais. Trabalha em
+  // `tl` (normalizado) pra evitar \b falhar com acentos.
+  let tituloLimpo = tl
     .replace(/^(tenho\s+que|preciso|vou|lembrete:?|anotar:?|anota:?)/i, '')
-    .replace(/,?\s*(amanh[ãa]|hoje|semana\s+que\s+vem|m[êe]s\s+que\s+vem|fim\s+(?:do|d[eo])\s+m[êe]s|segunda|ter[çc]a|quarta|quinta|sexta|s[áa]bado|domingo)$/i, '')
-    .replace(/\b(?:daqui\s+a\s+\d+\s+dias?|pr[óo]ximo\s+dia\s+\d+|dia\s+\d{1,2})\b/i, '')
-    .replace(/\b(?:[àa]s?\s+\d{1,2}h(?:\d{2})?|[àa]s?\s+\d{1,2}:\d{2}|de\s+(?:manh[ãa]|tarde|noite))\b/i, '')
-    .replace(/\b(?:at[ée]?\s+(?:dia|o\s+dia|a\s+data|sexta|quarta|quinta|ter[çc]a|segunda|s[áa]bado|domingo|amanh[ãa]|hoje))\b/i, '')
+    .replace(/,?\s*(amanha|hoje|semana\s+que\s+vem|mes\s+que\s+vem|fim\s+(?:do|do|de)\s+mes|segunda|terca|quarta|quinta|sexta|sabado|domingo)$/i, '')
+    .replace(/\b(?:daqui\s+a\s+\d+\s+dias?|proximo\s+dia\s+\d+|dia\s+\d{1,2})\b/i, '')
+    .replace(/\b(?:as?\s+\d{1,2}h(?:\d{2})?|as?\s+\d{1,2}:\d{2}|de\s+(?:manha|tarde|noite))\b/i, '')
+    .replace(/\b(?:ate?\s+(?:dia|o\s+dia|a\s+data|sexta|quarta|quinta|terca|segunda|sabado|domingo|amanha|hoje))\b/i, '')
     .replace(/\s+/g, ' ')
     .trim();
 
   // Se sobrou vazio ou só verbos, usa primeira frase nominal
   if (!tituloLimpo || tituloLimpo.length < 3) {
-    tituloLimpo = t.replace(/\b(tenho\s+que|preciso|vou|lembrete:?)\b/i, '').trim();
+    tituloLimpo = tl.replace(/\b(tenho\s+que|preciso|vou|lembrete:?)\b/i, '').trim();
   }
 
   // Capitaliza primeira letra
