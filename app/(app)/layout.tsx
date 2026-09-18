@@ -3,7 +3,7 @@ import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { requireUser, createClient } from '@/lib/supabase/server';
 import { LogoutButton } from './_components/logout-button';
-import { Wallet, LayoutDashboard, MessageCircle, Tags, ListChecks, ScrollText } from 'lucide-react';
+import { Wallet, LayoutDashboard, MessageCircle, Tags, ListChecks, ScrollText, ListTodo } from 'lucide-react';
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const { userId, email } = await requireUser();
@@ -55,6 +55,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         <NavSubLink href="/financeiro/categorias" icon={<Tags className="w-3.5 h-3.5" />}>
           Categorias
         </NavSubLink>
+
+        <NavLink href="/tarefas" icon={<ListTodo className="w-4 h-4" />}>
+          Tarefas
+        </NavLink>
 
         <NavLink href="/painel/whatsapp" icon={<MessageCircle className="w-4 h-4" />}>
           WhatsApp

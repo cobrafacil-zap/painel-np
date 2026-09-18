@@ -8,6 +8,16 @@
     "app/api/whatsapp/webhook/route.ts": {
       "maxDuration": 60,
       "memory": 1024
+    },
+    "app/api/cron/disparar-lembretes/route.ts": {
+      "maxDuration": 60,
+      "memory": 512
     }
-  }
+  },
+  "crons": [
+    {
+      "path": "/api/cron/disparar-lembretes",
+      "schedule": "*/5 * * * *"
+    }
+  ]
 }

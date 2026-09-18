@@ -4,8 +4,12 @@ import { parseMensagem } from '@/modules/financeiro/lib/parser-mensagem';
 import { responderConsulta } from '@/modules/financeiro/lib/consultas';
 import { executarAcao } from '@/modules/financeiro/lib/acoes';
 import { criarCompromisso, resumoCompromissos, listarParcelas, marcarParcelaPaga } from '@/modules/financeiro/lib/compromissos';
+import { parseTarefa } from '@/modules/tarefas/lib/parser-mensagem';
+import { criarTarefa, concluirTarefaPorTexto, concluirPorReaction } from '@/modules/tarefas/lib/acoes';
+import { mensagemAmbiguidade } from '@/modules/tarefas/lib/mensagens';
 import { evolutionEnviarTexto } from '@/lib/evolution';
 import { transcreverAudio } from '@/lib/transcricao';
+import { tokenParaData, tokenParaHora } from '@/lib/datas';
 import { formatBRL, todayISO } from '@/lib/utils';
 import type { FinanceRecord } from '@/lib/types';
 
@@ -234,20 +238,84 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, skipped: true });
   }
 
+  // === HANDLER DE REAÇÃO ✅ (módulo Tarefas) ===
+  // Quando alguém reage com ✅ à msg de confirmação de uma tarefa, o
+  // webhook recebe um evento com `message.reactionMessage` apontando
+  // pra msg original. Marcamos a tarefa correspondente como concluída
+  // e respondemos com confirmação no grupo.
+  const reaction =
+    message?.reactionMessage ??
+    message?.ephemeralMessage?.message?.reactionMessage ??
+    null;
+  if (reaction) {
+    const emoji = reaction.text;
+    const reactedToId = reaction.key?.id;
+    if (emoji === '✅' && reactedToId) {
+      const result = await concluirPorReaction(reactedToId);
+      if (result.ok && result.reply) {
+        await safeSend(remoteJid, result.reply, instanceFromPayload);
+        return NextResponse.json({ ok: true, intent: 'reacao_concluir' });
+      }
+      // reação que não casa com nenhuma tarefa → ignora silenciosamente
+      return NextResponse.json({ ok: true, skipped: 'reaction_no_match' });
+    }
+    // outras reações → ignora
+    return NextResponse.json({ ok: true, skipped: 'reaction_other' });
+  }
+
+  // === ACIONAR TAREFA POR TEXTO ("concluí X", "feito Y") ===
+  // Regex local: detecta frases curtas com verbo de conclusão + trecho
+  // do título. Se bater, chama concluirTarefaPorTexto e responde.
+  const tlConcluir = texto.trim().toLowerCase();
+  const concluMatch = tlConcluir.match(/^(conclu[íi]|feito|pronto|terminei|finalizei|ok|done)\s+(.+)$/i);
+  if (concluMatch) {
+    const trecho = concluMatch[2].trim();
+    // Só dispara se o trecho tiver pelo menos 3 chars (evita "feito" solto)
+    if (trecho.length >= 3) {
+      const result = await concluirTarefaPorTexto(userId, trecho);
+      await safeSend(remoteJid, result.reply || '🤷 Não entendi qual tarefa.', instanceFromPayload);
+      return NextResponse.json({ ok: true, intent: 'concluir_tarefa_texto' });
+    }
+  }
+
   // 3. ACK VISUAL em paralelo com parse IA.
   // O ack sai imediatamente (Evolution tem fila interna, entrega em ms),
   // o parser roda em paralelo. Quando o parser terminar, mandamos a
   // confirmação detalhada.
   const ackPromise = safeSend(remoteJid, `⏳ Anotando…`, instanceFromPayload);
 
+  // === CLASSIFICADOR DE MÓDULO (regex local, custo zero) ===
+  // Decide qual parser chamar: financeiro (existente) ou tarefas (novo).
+  const modulo = classificarModulo(texto);
+  console.log(`[webhook] classificarModulo=${modulo}`);
+
   let parsed;
   try {
-    parsed = await Promise.race([
-      parseMensagem(texto),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('parser timeout')), 25_000)
-      ),
-    ]);
+    if (modulo === 'tarefas') {
+      parsed = await Promise.race([
+        parseTarefa(texto),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('parser-tarefa timeout')), 25_000)
+        ),
+      ]);
+    } else if (modulo === 'financeiro') {
+      parsed = await Promise.race([
+        parseMensagem(texto),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('parser timeout')), 25_000)
+        ),
+      ]);
+    } else {
+      // 'outro' → cai pro financeiro (comportamento legado cobre cumprimentos,
+      // perguntas, etc.). Se for tarefa_ambigua, o financeiro devolve intent
+      // 'outro' e respondemos com a mensagem padrão.
+      parsed = await Promise.race([
+        parseMensagem(texto),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('parser timeout')), 25_000)
+        ),
+      ]);
+    }
   } catch (e: any) {
     console.error('parser error:', e);
     await ackPromise;
@@ -259,6 +327,63 @@ export async function POST(req: NextRequest) {
   await ackPromise;
 
   // 4. Roteamento por intent
+  // === Tarefas ===
+  if (parsed.intent === 'tarefa') {
+    const t = parsed as Extract<typeof parsed, { intent: 'tarefa' }>;
+    const dataPrazo = tokenParaData(t.data_token);
+    if (!dataPrazo) {
+      // Sem data reconhecível → pergunta
+      await safeSend(remoteJid, mensagemAmbiguidade('sem_data'), instanceFromPayload);
+      return NextResponse.json({ ok: true, intent: 'tarefa_ambigua', motivo: 'sem_data' });
+    }
+    const horaPrazo = t.hora_token ? tokenParaHora(t.hora_token) : null;
+
+    // Cria tarefa + manda confirmação. Em paralelo: manda confirmação,
+    // grava tarefa, agenda lembretes.
+    const result = await criarTarefa(
+      userId,
+      {
+        texto_original: texto,
+        titulo: t.titulo,
+        descricao: t.descricao,
+        data_prazo: dataPrazo,
+        hora_prazo: horaPrazo,
+        tipo: horaPrazo ? 'compromisso' : 'prazo',
+        categoria: t.categoria,
+        prioridade: t.prioridade,
+        recorrencia: t.recorrencia,
+        source: 'whatsapp',
+        source_message_id: messageId,
+      },
+      // Não passa confirmMessageId aqui — safeSend ainda não rodou.
+      undefined
+    );
+
+    // Mensagem de confirmação (curta, com data/lembretes). Capturamos o
+    // ID da msg pra gravar em tarefas.confirm_message_id — é esse ID
+    // que o handler de reação ✅ busca pra concluir a tarefa.
+    const sent = await safeSend(remoteJid, result.reply, instanceFromPayload);
+    if (result.ok && result.id && sent.id) {
+      try {
+        await supabase
+          .from('tarefas')
+          .update({ confirm_message_id: sent.id })
+          .eq('id', result.id)
+          .eq('user_id', userId);
+      } catch (e) {
+        console.warn('[webhook] não gravou confirm_message_id:', e);
+      }
+    }
+
+    return NextResponse.json({ ok: true, intent: 'tarefa', id: result.id });
+  }
+
+  if (parsed.intent === 'tarefa_ambigua') {
+    const t = parsed as Extract<typeof parsed, { intent: 'tarefa_ambigua' }>;
+    await safeSend(remoteJid, mensagemAmbiguidade(t.motivo), instanceFromPayload);
+    return NextResponse.json({ ok: true, intent: 'tarefa_ambigua', motivo: t.motivo });
+  }
+
   if (parsed.intent === 'outro' || parsed.confidence < 0.6) {
     await safeSend(
       remoteJid,
@@ -436,49 +561,54 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({ ok: true, skipped: true });
 }
 
-async function safeSend(destino: string, texto: string, instance?: string) {
+async function safeSend(
+  destino: string,
+  texto: string,
+  instance?: string
+): Promise<{ id: string | null }> {
   try {
-    await evolutionEnviarTexto(destino, texto, 0, 45_000, instance);
+    const r = await evolutionEnviarTexto(destino, texto, 0, 45_000, instance);
+    return { id: r.id || null };
   } catch (e) {
     console.error('evolution send error:', e);
+    return { id: null };
   }
 }
 
 /**
- * Converte token de data do parser em ISO date (YYYY-MM-DD).
- * Aceita: 'HOJE', 'AMANHA', 'DIA_5'.
- *
- * IMPORTANTE: comparação de datas IGNORA horário (zero hora) pra evitar
- * confusão com fuso ou hora de envio da mensagem.
+ * Classifica a mensagem em qual módulo deve processá-la.
+ * Regex local (custo zero, sem IA). Heurística:
+ *  - Verbo financeiro COM valor monetário → financeiro.
+ *  - Verbo financeiro SEM marcador de tarefa → financeiro.
+ *  - Marcador forte de tarefa SEM verbo financeiro → tarefas.
+ *  - Marcador de tarefa + verbo financeiro sem valor → AMBÍGUO (deixa
+ *    pro parseTarefa decidir via motivo=financeiro_ou_tarefa).
+ *  - Sem marcadores fortes → outro.
  */
-function tokenParaData(token: string | null | undefined): string | null {
-  if (!token) return null;
-  const t = token.toUpperCase();
+function classificarModulo(texto: string): 'financeiro' | 'tarefas' | 'outro' {
+  const t = texto.toLowerCase().trim();
+  if (!t) return 'outro';
 
-  // Zera o horário pra comparar só a data
-  const hoje = new Date();
-  hoje.setHours(0, 0, 0, 0);
+  const temVerboFinanceiro =
+    /\b(gastei|gastar|comprei|comprar|sac[ou]ei|debit[ou]|custei|paguei|pagar|pago|recebi|receber|ganhei|ganhar|peguei|tirei|emprestei|faturei|saiu|custou|entrou|caiu|depositou)\b/i.test(t);
 
-  if (t === 'HOJE') return hoje.toISOString().slice(0, 10);
+  const temValorMonetario =
+    /r\$\s*\d|\b\d{1,3}(?:\.\d{3})+|\b\d+[,\.]\d{2}\b|\b\d{3,}\b/.test(t);
 
-  if (t === 'AMANHA') {
-    const amanha = new Date(hoje);
-    amanha.setDate(amanha.getDate() + 1);
-    return amanha.toISOString().slice(0, 10);
-  }
+  const temMarcadorTarefa =
+    /\b(tenho\s+que|preciso|vou\s+(?:fazer|ir|ligar|entregar|marcar|lembrar)|lembrar|lembrete|reuni[ãa]o|entregar|ligar|anotar|anota|agendar|marcar|campanha|lembrete)\b/i.test(
+      t
+    );
 
-  const m = t.match(/^DIA_(\d{1,2})$/);
-  if (m) {
-    const dia = parseInt(m[1], 10);
-    if (dia >= 1 && dia <= 31) {
-      // Mês atual sempre. Se já passou, joga pro próximo.
-      let d = new Date(hoje.getFullYear(), hoje.getMonth(), dia);
-      d.setHours(0, 0, 0, 0);
-      if (d.getTime() < hoje.getTime()) {
-        d = new Date(hoje.getFullYear(), hoje.getMonth() + 1, dia);
-      }
-      return d.toISOString().slice(0, 10);
-    }
-  }
-  return null;
+  // Financeiro forte: verbo financeiro + valor
+  if (temVerboFinanceiro && temValorMonetario) return 'financeiro';
+  // Financeiro sem tarefa: "paguei a conta" sem "fazer reunião"
+  if (temVerboFinanceiro && !temMarcadorTarefa) return 'financeiro';
+  // Tarefa forte: marcador de tarefa sem verbo financeiro
+  if (temMarcadorTarefa && !temVerboFinanceiro) return 'tarefas';
+  // Ambíguo: marcador de tarefa + verbo financeiro sem valor → tarefas
+  // (parseTarefa vai detectar como tarefa_ambigua motivo=financeiro_ou_tarefa)
+  if (temMarcadorTarefa && temVerboFinanceiro && !temValorMonetario) return 'tarefas';
+  // Sem marcadores fortes
+  return 'outro';
 }

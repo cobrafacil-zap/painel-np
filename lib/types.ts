@@ -88,3 +88,51 @@ export interface CompromissoParcela {
   created_at: string;
   updated_at: string;
 }
+
+// =========================================================================
+// TAREFAS (módulo Tarefas — migration 007)
+// =========================================================================
+
+export type TaskType = 'compromisso' | 'prazo';
+export type TaskPriority = 'baixa' | 'media' | 'alta';
+export type TaskStatus = 'pendente' | 'concluida' | 'cancelada';
+
+export interface Tarefa {
+  id: string;
+  user_id: string;
+  module_id: string;
+  texto_original: string;
+  titulo: string;
+  descricao: string | null;
+  data_prazo: string; // ISO date YYYY-MM-DD
+  hora_prazo: string | null; // 'HH:MM:SS' ou null (prazo = sem hora)
+  tipo: TaskType;
+  categoria: string | null;
+  prioridade: TaskPriority;
+  status: TaskStatus;
+  recorrencia: 'semanal' | 'mensal' | null;
+  source: RecordSource;
+  source_message_id: string | null;
+  created_at: string;
+  updated_at: string;
+  concluida_em: string | null;
+  confirm_message_id: string | null;
+}
+
+export type ReminderCanal = 'whatsapp';
+export type ReminderMotivo = 'aviso_previo' | 'aviso_imediato' | 'atraso_diario';
+
+export interface LembreteAgendado {
+  id: string;
+  user_id: string;
+  tarefa_id: string;
+  canal: ReminderCanal;
+  motivo: ReminderMotivo;
+  disparar_em: string;
+  disparado_em: string | null;
+  cancelado_em: string | null;
+  erro: string | null;
+  tentativas: number;
+  created_at: string;
+  updated_at: string;
+}
