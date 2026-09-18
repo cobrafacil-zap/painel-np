@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { formatBRL, startOfMonthISO, endOfMonthISO, monthISO } from '@/lib/utils';
 import { TrendingUp, TrendingDown, Wallet } from 'lucide-react';
+import { useCountUp } from '@/lib/hooks/use-count-up';
 import {
   BarChart,
   Bar,
@@ -44,7 +45,21 @@ export function ResumoCharts({ refreshKey }: { refreshKey: number }) {
       .finally(() => setLoading(false));
   }, [refreshKey]);
 
-  if (loading) return <div className="card">Carregando…</div>;
+  if (loading) {
+    return (
+      <div className="space-y-4">
+        <div className="grid gap-4 md:grid-cols-3">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="glass p-5 h-24 shimmer rounded-xl" />
+          ))}
+        </div>
+        <div className="grid gap-4 lg:grid-cols-2">
+          <div className="glass p-5 h-[300px] shimmer rounded-xl" />
+          <div className="glass p-5 h-[300px] shimmer rounded-xl" />
+        </div>
+      </div>
+    );
+  }
   if (!data) return null;
 
   return (
@@ -53,25 +68,25 @@ export function ResumoCharts({ refreshKey }: { refreshKey: number }) {
         <CardKPI
           icon={<TrendingUp className="w-4 h-4 text-emerald-400" />}
           label="Receitas (mês)"
-          value={formatBRL(data.total_receitas)}
+          value={data.total_receitas}
           color="emerald"
         />
         <CardKPI
           icon={<TrendingDown className="w-4 h-4 text-red-400" />}
           label="Gastos (mês)"
-          value={formatBRL(data.total_gastos)}
+          value={data.total_gastos}
           color="red"
         />
         <CardKPI
           icon={<Wallet className="w-4 h-4 text-zinc-400" />}
           label="Saldo (mês)"
-          value={formatBRL(data.saldo)}
+          value={data.saldo}
           color={data.saldo >= 0 ? 'emerald' : 'red'}
         />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <div className="card">
+        <div className="glass p-5">
           <h3 className="font-semibold mb-3">Gastos por categoria</h3>
           {data.por_categoria.length === 0 ? (
             <p className="text-sm text-zinc-500">Sem gastos no período.</p>
@@ -98,7 +113,7 @@ export function ResumoCharts({ refreshKey }: { refreshKey: number }) {
           )}
         </div>
 
-        <div className="card">
+        <div className="glass p-5">
           <h3 className="font-semibold mb-3">Top categorias (barras)</h3>
           {data.por_categoria.length === 0 ? (
             <p className="text-sm text-zinc-500">Sem dados.</p>
@@ -119,7 +134,7 @@ export function ResumoCharts({ refreshKey }: { refreshKey: number }) {
         </div>
       </div>
 
-      <div className="card">
+      <div className="glass p-5">
         <h3 className="font-semibold mb-3">Evolução mensal (últimos 6 meses)</h3>
         {data.evolucao_mensal.length === 0 ? (
           <p className="text-sm text-zinc-500">Sem dados.</p>
@@ -152,17 +167,24 @@ function CardKPI({
 }: {
   icon: React.ReactNode;
   label: string;
-  value: string;
+  value: number;
   color: 'emerald' | 'red';
 }) {
+  const animated = useCountUp(value);
   const colorClass = color === 'emerald' ? 'text-emerald-300' : 'text-red-300';
+  const accentBg =
+    color === 'emerald' ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-red-500/10 border-red-500/20';
   return (
-    <div className="card">
-      <div className="flex items-center gap-2">
-        {icon}
-        <p className="text-xs text-zinc-500">{label}</p>
+    <div className="glass p-5 card-hover-lift">
+      <div className="flex items-center gap-2.5">
+        <div className={`w-9 h-9 rounded-lg border flex items-center justify-center ${accentBg}`}>
+          {icon}
+        </div>
+        <p className="label-eyebrow">{label}</p>
       </div>
-      <p className={`text-2xl font-semibold mt-2 ${colorClass}`}>{value}</p>
+      <p className={`text-3xl font-bold num-tabular mt-3 ${colorClass}`}>
+        {formatBRL(animated)}
+      </p>
     </div>
   );
 }

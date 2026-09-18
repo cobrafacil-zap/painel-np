@@ -1,7 +1,7 @@
 'use client';
 
-import { CheckCircle2, Pencil, X, AlertTriangle, Calendar, Clock, Repeat } from 'lucide-react';
-import { formatDateBR } from '@/lib/utils';
+import { CheckCircle2, Pencil, X, AlertTriangle, Calendar, Clock, Repeat, GripVertical, Check } from 'lucide-react';
+import { formatDateBR, cn } from '@/lib/utils';
 import type { Tarefa } from '@/lib/types';
 
 const DIAS_PT = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
@@ -22,10 +22,10 @@ function horaCurta(hms: string | null): string {
   return hms ? hms.slice(0, 5) : '';
 }
 
-const PRIORIDADE_COR: Record<string, string> = {
-  alta: 'text-red-300 border-red-500/30',
-  media: 'text-amber-300 border-amber-500/30',
-  baixa: 'text-zinc-400 border-zinc-500/30',
+const PRIORIDADE_COR: Record<string, { texto: string; borda: string; bg: string }> = {
+  alta: { texto: 'text-red-300', borda: 'border-red-500/30', bg: 'bg-red-500/10' },
+  media: { texto: 'text-amber-300', borda: 'border-amber-500/30', bg: 'bg-amber-500/10' },
+  baixa: { texto: 'text-zinc-400', borda: 'border-zinc-500/30', bg: 'bg-white/[0.04]' },
 };
 
 export function TarefaCard({
@@ -49,23 +49,56 @@ export function TarefaCard({
 
   return (
     <div
-      className={`card ${
-        concluida || cancelada ? 'opacity-60' : ''
-      } ${atrasada ? 'border-red-500/40' : hoje ? 'border-amber-500/40' : ''}`}
+      className={cn(
+        'group glass card-hover-lift p-4 sm:p-5',
+        concluida || cancelada ? 'opacity-60' : '',
+        atrasada && 'pulse-border-l',
+        !atrasada && (hoje ? 'border-amber-500/30' : '')
+      )}
     >
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex items-start gap-3">
+        {/* Drag handle (apenas hover, em telas grandes) */}
+        <GripVertical className="hidden sm:block w-4 h-4 text-zinc-600 opacity-0 group-hover:opacity-100 transition-opacity cursor-grab active:cursor-grabbing mt-1 shrink-0" />
+
+        {/* Concluir (círculo grande) */}
+        {t.status === 'pendente' && (
+          <button
+            onClick={() => onConcluir(t.id)}
+            className={cn(
+              'shrink-0 w-7 h-7 rounded-full border-2 flex items-center justify-center transition-all mt-0.5',
+              'border-zinc-600 hover:border-emerald-400 hover:bg-emerald-400/10',
+              'hover:scale-110 active:scale-95'
+            )}
+            title="Marcar como concluída"
+            aria-label="Concluir"
+          >
+            <Check className="w-3.5 h-3.5 text-emerald-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+          </button>
+        )}
+        {concluida && (
+          <div className="shrink-0 w-7 h-7 rounded-full border-2 border-emerald-500 bg-emerald-500/15 flex items-center justify-center mt-0.5">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+          </div>
+        )}
+        {cancelada && (
+          <div className="shrink-0 w-7 h-7 rounded-full border-2 border-zinc-600 bg-white/[0.02] flex items-center justify-center mt-0.5">
+            <X className="w-3.5 h-3.5 text-zinc-500" />
+          </div>
+        )}
+
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-lg">{t.tipo === 'compromisso' ? '📅' : '⏳'}</span>
-            <h3
-              className={`font-medium truncate ${
-                concluida ? 'line-through' : ''
-              }`}
-            >
+            <span className="text-base shrink-0">{t.tipo === 'compromisso' ? '📅' : '⏳'}</span>
+            <h3 className={cn('font-medium truncate', concluida && 'line-through text-zinc-500')}>
               {t.titulo}
             </h3>
             <span
-              className={`text-[10px] px-1.5 py-0.5 rounded border ${corPrio}`}
+              className={cn(
+                'text-[10px] px-1.5 py-0.5 rounded border uppercase tracking-wider',
+                corPrio.texto,
+                corPrio.borda,
+                corPrio.bg
+              )}
               title={`Prioridade ${t.prioridade}`}
             >
               {t.prioridade}
@@ -82,9 +115,7 @@ export function TarefaCard({
               </span>
             )}
             {cancelada && (
-              <span className="inline-flex items-center gap-1 text-xs text-zinc-500">
-                cancelada
-              </span>
+              <span className="inline-flex items-center gap-1 text-xs text-zinc-500">cancelada</span>
             )}
           </div>
 
@@ -110,32 +141,31 @@ export function TarefaCard({
                 {horaCurta(t.hora_prazo)}
               </span>
             )}
-            {t.categoria && (
-              <span className="text-zinc-400">• {t.categoria}</span>
-            )}
+            {t.categoria && <span className="text-zinc-400">• {t.categoria}</span>}
           </div>
         </div>
 
-        <div className="flex gap-1 shrink-0">
+        <div className="flex gap-1 shrink-0 opacity-60 group-hover:opacity-100 transition-opacity">
           {t.status === 'pendente' && (
             <button
               onClick={() => onConcluir(t.id)}
-              className="text-xs px-2.5 py-1 rounded bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25"
+              className="hidden sm:inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 transition-colors"
               title="Marcar como concluída"
             >
-              ✓ Concluir
+              <Check className="w-3 h-3" />
+              Concluir
             </button>
           )}
           <button
             onClick={() => onEdit(t)}
-            className="p-1.5 rounded hover:bg-bg-elevated text-zinc-400 hover:text-zinc-200"
+            className="p-1.5 rounded-md hover:bg-white/[0.06] text-zinc-400 hover:text-zinc-100 transition-colors"
             title="Editar"
           >
             <Pencil className="w-4 h-4" />
           </button>
           <button
             onClick={() => onDelete(t.id)}
-            className="p-1.5 rounded hover:bg-red-500/10 text-zinc-500 hover:text-red-300"
+            className="p-1.5 rounded-md hover:bg-red-500/10 text-zinc-500 hover:text-red-300 transition-colors"
             title="Apagar"
           >
             <X className="w-4 h-4" />

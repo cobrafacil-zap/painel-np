@@ -1,72 +1,166 @@
-import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
-import { formatBRL, monthISO, startOfMonthISO, endOfMonthISO } from '@/lib/utils';
-import { Wallet } from 'lucide-react';
+import { startOfMonthISO, endOfMonthISO, formatBRL, formatDateBR } from '@/lib/utils';
+import type { Tarefa, FinanceRecord } from '@/lib/types';
+import { HeroSaldo } from './_components/hero-saldo';
+import { TarefasProximas } from './_components/tarefas-proximas';
+import { GraficoGastos7d } from './_components/grafico-gastos-7d';
+import { HeatmapAtividade } from './_components/heatmap-atividade';
+import { TopCategorias } from './_components/top-categorias';
+import { AtalhosRapidos } from './_components/atalhos-rapidos';
+import { InstallPWAButton } from './_components/install-pwa-button';
 
 export default async function PainelPage() {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
   if (!user) return null;
 
   const inicio = startOfMonthISO();
   const fim = endOfMonthISO();
 
-  // Resumo rápido do mês
-  const { data: recs } = await supabase
-    .from('records')
-    .select('type, amount')
-    .eq('user_id', user.id)
-    .eq('module_id', 'financeiro')
-    .gte('occurred_at', inicio)
-    .lte('occurred_at', fim);
+  // 7 dias atrás pra sparkline + heatmap
+  const seteDiasAtras = new Date();
+  seteDiasAtras.setDate(seteDiasAtras.getDate() - 27);
+  const seteDiasAtrasISO = seteDiasAtras.toISOString().slice(0, 10);
 
-  const receitas = (recs ?? []).filter((r: any) => r.type === 'receita').reduce((s: number, r: any) => s + Number(r.amount), 0);
-  const gastos = (recs ?? []).filter((r: any) => r.type === 'gasto').reduce((s: number, r: any) => s + Number(r.amount), 0);
+  // 5 dias pra frente (pra heatmap)
+  const hojeISO = new Date().toISOString().slice(0, 10);
+
+  // Fetch paralelo: tarefas pendentes, records mês, records 28 dias
+  const [tarefasRes, recordsMesRes, recordsRecentesRes, profileRes] = await Promise.all([
+    supabase
+      .from('tarefas')
+      .select('*')
+      .eq('user_id', user.id)
+      .eq('status', 'pendente')
+      .order('data_prazo', { ascending: true, nullsFirst: false })
+      .order('hora_prazo', { ascending: true, nullsFirst: false })
+      .order('ordem', { ascending: true, nullsFirst: false })
+      .limit(8),
+    supabase
+      .from('records')
+      .select('type, amount')
+      .eq('user_id', user.id)
+      .eq('module_id', 'financeiro')
+      .gte('occurred_at', inicio)
+      .lte('occurred_at', fim),
+    supabase
+      .from('records')
+      .select('type, amount, category, occurred_at')
+      .eq('user_id', user.id)
+      .eq('module_id', 'financeiro')
+      .gte('occurred_at', seteDiasAtrasISO)
+      .lte('occurred_at', hojeISO),
+    supabase
+      .from('profiles')
+      .select('full_name, evolution_instance_name, evolution_status')
+      .eq('id', user.id)
+      .single(),
+  ]);
+
+  const tarefas = (tarefasRes.data ?? []) as Tarefa[];
+  const receitas = (recordsMesRes.data ?? [])
+    .filter((r: any) => r.type === 'receita')
+    .reduce((s: number, r: any) => s + Number(r.amount), 0);
+  const gastos = (recordsMesRes.data ?? [])
+    .filter((r: any) => r.type === 'gasto')
+    .reduce((s: number, r: any) => s + Number(r.amount), 0);
   const saldo = receitas - gastos;
+
+  // === 7 dias (sparkline) — array de 7 dias, do mais antigo ao mais recente ===
+  const sparklineDias = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date();
+    d.setDate(d.getDate() - (6 - i));
+    return d.toISOString().slice(0, 10);
+  });
+  const sparklineLabels = sparklineDias.map((iso) =>
+    new Date(iso + 'T00:00:00').toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.', '')
+  );
+  const sparklineData = sparklineDias.map((iso) =>
+    (recordsRecentesRes.data ?? [])
+      .filter((r: any) => r.type === 'gasto' && r.occurred_at === iso)
+      .reduce((s: number, r: any) => s + Number(r.amount), 0)
+  );
+
+  // === Heatmap — 28 dias ===
+  const heatmapMap = new Map<string, number>();
+  for (const r of recordsRecentesRes.data ?? []) {
+    if (r.type !== 'gasto') continue;
+    heatmapMap.set(
+      r.occurred_at,
+      (heatmapMap.get(r.occurred_at) ?? 0) + Number(r.amount)
+    );
+  }
+  const heatmapData = Array.from(heatmapMap.entries()).map(([dia, valor]) => ({
+    dia,
+    valor,
+  }));
+
+  // === Top categorias (mês) ===
+  const porCategoria = new Map<string, number>();
+  for (const r of recordsMesRes.data ?? []) {
+    if (r.type !== 'gasto') continue;
+    const cat = (r as any).category || 'Outros';
+    porCategoria.set(cat, (porCategoria.get(cat) ?? 0) + Number(r.amount));
+  }
+  const topCategorias = Array.from(porCategoria.entries())
+    .map(([label, value]) => ({ label, value }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 5);
+
+  const periodo = new Date().toLocaleDateString('pt-BR', {
+    month: 'long',
+    year: 'numeric',
+  });
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-2xl font-semibold">Visão geral</h1>
-        <p className="text-sm text-zinc-500 mt-1">
-          {new Date().toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}
-        </p>
-      </header>
-
-      <div className="grid gap-4 md:grid-cols-3">
-        <div className="card">
-          <p className="text-xs text-zinc-500">Receitas (mês)</p>
-          <p className="text-2xl font-semibold mt-1 text-emerald-300">{formatBRL(receitas)}</p>
-        </div>
-        <div className="card">
-          <p className="text-xs text-zinc-500">Gastos (mês)</p>
-          <p className="text-2xl font-semibold mt-1 text-red-300">{formatBRL(gastos)}</p>
-        </div>
-        <div className="card">
-          <p className="text-xs text-zinc-500">Saldo (mês)</p>
-          <p className={`text-2xl font-semibold mt-1 ${saldo >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>
-            {formatBRL(saldo)}
+      {/* HEADER */}
+      <header className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <p className="label-eyebrow">Painel</p>
+          <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight capitalize text-zinc-50 mt-1">
+            {periodo}
+          </h1>
+          <p className="text-sm text-zinc-500 mt-1">
+            {profileRes.data?.full_name ? `Olá, ${profileRes.data.full_name.split(' ')[0]}.` : 'Olá.'}{' '}
+            {tarefas.length === 0
+              ? 'Nada pendente por aqui.'
+              : `${tarefas.length} tarefa${tarefas.length > 1 ? 's' : ''} pendente${
+                  tarefas.length > 1 ? 's' : ''
+                }.`}
           </p>
         </div>
-      </div>
+        <InstallPWAButton />
+      </header>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <Link href="/financeiro" className="card hover:bg-bg-elevated transition-colors">
-          <div className="flex items-start gap-3">
-            <Wallet className="w-5 h-5 text-emerald-400 mt-0.5" />
-            <div>
-              <h2 className="font-semibold">Financeiro</h2>
-              <p className="text-sm text-zinc-500 mt-1">
-                Lançamentos, gráficos, orçamento e integração com WhatsApp.
-              </p>
-            </div>
-          </div>
-        </Link>
-        <div className="card opacity-50">
-          <h2 className="font-semibold">Treino</h2>
-          <p className="text-sm text-zinc-500 mt-1">Em breve.</p>
+      {/* HERO SALDO */}
+      <HeroSaldo receitas={receitas} gastos={gastos} saldo={saldo} />
+
+      {/* GRID: TAREFAS + ATALHOS */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-5">
+        <div className="lg:col-span-8">
+          <TarefasProximas tarefas={tarefas} />
+        </div>
+        <div className="lg:col-span-4">
+          <AtalhosRapidos
+            whatsappOn={!!profileRes.data?.evolution_instance_name}
+          />
         </div>
       </div>
+
+      {/* GRID: GRÁFICOS */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-5">
+        <div className="lg:col-span-5">
+          <GraficoGastos7d data={sparklineData} labels={sparklineLabels} />
+        </div>
+        <div className="lg:col-span-7">
+          <HeatmapAtividade data={heatmapData} />
+        </div>
+      </div>
+
+      <TopCategorias data={topCategorias} />
     </div>
   );
 }

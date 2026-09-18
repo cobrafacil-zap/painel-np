@@ -1,10 +1,15 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Plus } from 'lucide-react';
+import { Plus, ListTodo } from 'lucide-react';
 import { TarefaCard } from './_components/tarefa-card';
 import { TarefaForm } from './_components/tarefa-form';
+import { RingProgress } from '@/lib/svg/ring-progress';
+import { EmptyState } from '@/components/ui/empty-state';
+import { Button } from '@/components/ui/button';
 import type { Tarefa } from '@/lib/types';
+
+type Filtro = 'pendente' | 'concluida' | 'cancelada' | 'todas';
 
 export default function TarefasPage() {
   const [tarefas, setTarefas] = useState<Tarefa[]>([]);
@@ -13,9 +18,7 @@ export default function TarefasPage() {
   const [showNew, setShowNew] = useState(false);
   const [editing, setEditing] = useState<Tarefa | null>(null);
   const [toast, setToast] = useState<string | null>(null);
-  const [filtro, setFiltro] = useState<'pendente' | 'concluida' | 'cancelada' | 'todas'>(
-    'pendente'
-  );
+  const [filtro, setFiltro] = useState<Filtro>('pendente');
 
   useEffect(() => {
     setLoading(true);
@@ -55,9 +58,11 @@ export default function TarefasPage() {
 
   // Resumo
   const hoje = new Date().toISOString().slice(0, 10);
-  const amanha = new Date();
-  amanha.setDate(amanha.getDate() + 1);
-  const amanhaISO = amanha.toISOString().slice(0, 10);
+  const amanhaISO = (() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    return d.toISOString().slice(0, 10);
+  })();
 
   const totalPendentes = tarefas.filter((t) => t.status === 'pendente').length;
   const totalAtrasadas = tarefas.filter(
@@ -73,62 +78,92 @@ export default function TarefasPage() {
     <div className="space-y-6">
       <header className="flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="text-2xl font-semibold">Tarefas</h1>
+          <p className="label-eyebrow">Módulo</p>
+          <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-zinc-50 mt-1">
+            Tarefas
+          </h1>
           <p className="text-sm text-zinc-500 mt-1">
-            Compromissos e prazos. Manda no WhatsApp tipo
-            &ldquo;tenho reunião sexta às 14h&rdquo;.
+            Compromissos e prazos. Manda no WhatsApp tipo{' '}
+            <span className="text-zinc-400">
+              &ldquo;tenho reunião sexta às 14h&rdquo;
+            </span>
+            .
           </p>
         </div>
-        <button
+        <Button
+          variant="primary"
+          size="md"
           onClick={() => setShowNew(true)}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 text-sm font-medium"
+          className="rounded-full px-5 shadow-[0_0_24px_-6px_rgb(34,197,94,0.5)]"
         >
-          <Plus className="w-4 h-4" />
-          Nova tarefa
-        </button>
+          <Plus className="w-4 h-4" /> Nova tarefa
+        </Button>
       </header>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <SummaryCard label="📋 Pendentes" value={String(totalPendentes)} />
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
+        <SummaryCard label="Pendentes" value={totalPendentes} color="zinc" />
         <SummaryCard
-          label="🔴 Atrasadas"
-          value={String(totalAtrasadas)}
+          label="Atrasadas"
+          value={totalAtrasadas}
           color={totalAtrasadas > 0 ? 'red' : 'zinc'}
         />
         <SummaryCard
-          label="⏰ Próximas 24h"
-          value={String(totalProximas24h)}
+          label="Próx. 24h"
+          value={totalProximas24h}
           color={totalProximas24h > 0 ? 'amber' : 'zinc'}
         />
       </div>
 
-      <div className="flex gap-2">
-        {(['pendente', 'concluida', 'cancelada', 'todas'] as const).map((f) => (
+      <div className="flex gap-2 flex-wrap">
+        {(
+          [
+            { v: 'pendente', l: 'Pendentes' },
+            { v: 'concluida', l: 'Concluídas' },
+            { v: 'cancelada', l: 'Canceladas' },
+            { v: 'todas', l: 'Todas' },
+          ] as { v: Filtro; l: string }[]
+        ).map((f) => (
           <button
-            key={f}
-            onClick={() => setFiltro(f)}
-            className={`px-3 py-1.5 rounded-lg text-xs capitalize ${
-              filtro === f
-                ? 'bg-emerald-500/20 text-emerald-300'
-                : 'bg-bg-elevated text-zinc-400 hover:text-zinc-200'
+            key={f.v}
+            onClick={() => setFiltro(f.v)}
+            className={`px-3.5 py-1.5 rounded-full text-xs font-medium border transition-all ${
+              filtro === f.v
+                ? 'bg-accent-400/15 border-accent-400/40 text-accent-300 shadow-[0_0_18px_-4px_rgb(34,197,94,0.5)]'
+                : 'bg-white/[0.02] border-white/[0.06] text-zinc-400 hover:text-zinc-200 hover:border-white/15'
             }`}
           >
-            {f === 'todas' ? 'todas' : f === 'pendente' ? 'pendentes' : f === 'concluida' ? 'concluídas' : 'canceladas'}
+            {f.l}
           </button>
         ))}
       </div>
 
-      <div className="space-y-3 relative">
+      <div className="space-y-3 relative min-h-[200px]">
         {loading ? (
-          <p className="text-sm text-zinc-500">Carregando…</p>
-        ) : filtradas.length === 0 ? (
-          <div className="card p-8 text-center">
-            <p className="text-zinc-400">
-              {filtro === 'pendente'
-                ? 'Nenhuma tarefa pendente. Manda uma no WhatsApp!'
-                : `Nenhuma tarefa ${filtro === 'todas' ? '' : filtro}.`}
-            </p>
+          <div className="space-y-2">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="glass p-5 h-24 shimmer rounded-xl" />
+            ))}
           </div>
+        ) : filtradas.length === 0 ? (
+          <EmptyState
+            icon={<ListTodo className="w-10 h-10" />}
+            title={
+              filtro === 'pendente'
+                ? 'Nenhuma tarefa pendente'
+                : `Nenhuma tarefa ${
+                    filtro === 'todas'
+                      ? 'cadastrada'
+                      : filtro === 'concluida'
+                        ? 'concluída'
+                        : 'cancelada'
+                  }`
+            }
+            description={
+              filtro === 'pendente'
+                ? 'Manda no WhatsApp ou clica em "Nova tarefa".'
+                : 'Quando você mudar o status, ela aparece aqui.'
+            }
+          />
         ) : (
           filtradas.map((t) => (
             <TarefaCard
@@ -142,7 +177,7 @@ export default function TarefasPage() {
         )}
 
         {toast && (
-          <div className="fixed bottom-6 right-6 bg-bg-elevated border border-border rounded-lg px-4 py-2.5 text-sm shadow-lg z-50">
+          <div className="fixed bottom-6 right-6 z-50 glass-elevated px-4 py-2.5 text-sm shadow-xl fade-in-up">
             {toast}
           </div>
         )}
@@ -180,19 +215,36 @@ function SummaryCard({
   color = 'zinc',
 }: {
   label: string;
-  value: string;
+  value: number;
   color?: 'zinc' | 'red' | 'amber';
 }) {
+  const total = Math.max(value, 1);
   const cor =
-    color === 'red'
-      ? 'text-red-300'
-      : color === 'amber'
-        ? 'text-amber-300'
-        : 'text-zinc-200';
+    color === 'red' ? '#ef4444' : color === 'amber' ? '#f59e0b' : '#22c55e';
+  const ringColor = color === 'red' ? '#ef4444' : color === 'amber' ? '#f59e0b' : '#22c55e';
+
   return (
-    <div className="card">
-      <p className="text-xs text-zinc-500">{label}</p>
-      <p className={`text-2xl font-semibold tabular-nums mt-1 ${cor}`}>{value}</p>
+    <div className="glass p-4 flex items-center gap-4">
+      <RingProgress
+        percent={Math.min(100, (value / total) * 100)}
+        size={56}
+        stroke={6}
+        color={ringColor}
+      />
+      <div className="min-w-0">
+        <p className="label-eyebrow">{label}</p>
+        <p
+          className={`text-2xl font-bold num-tabular mt-1 ${
+            color === 'red'
+              ? 'text-red-300'
+              : color === 'amber'
+                ? 'text-amber-300'
+                : 'text-zinc-100'
+          }`}
+        >
+          {value}
+        </p>
+      </div>
     </div>
   );
 }
