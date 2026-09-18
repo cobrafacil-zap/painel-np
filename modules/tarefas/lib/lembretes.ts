@@ -209,7 +209,7 @@ export async function dispararLembretesVencidos(): Promise<{
   const { data: lembretes } = await supabase
     .from('lembretes_agendados')
     .select(
-      'id, user_id, tarefa_id, motivo, tentativas, tarefa:tarefas!inner(id, titulo, data_prazo, hora_prazo, status, user_id), profile:profiles!lembretes_agendados_user_id_fkey(whatsapp_group_jid, evolution_instance_name)'
+      'id, user_id, tarefa_id, motivo, tentativas, message_text, tarefa:tarefas(id, titulo, data_prazo, hora_prazo, status, user_id), profile:profiles!lembretes_agendados_user_id_fkey(whatsapp_group_jid, evolution_instance_name)'
     )
     .is('disparado_em', null)
     .is('cancelado_em', null)
@@ -222,7 +222,7 @@ export async function dispararLembretesVencidos(): Promise<{
   let desistidos = 0;
 
   for (const l of lembretes ?? []) {
-    const tarefa = (l as any).tarefa as Tarefa;
+    const tarefa = (l as any).tarefa as Tarefa | null;
     const profile = (l as any).profile as TarefaComJornada['profile'];
     const motivo = l.motivo as ReminderMotivo;
 
@@ -251,10 +251,27 @@ export async function dispararLembretesVencidos(): Promise<{
       continue;
     }
 
-    const texto = formatarLembrete(
-      { titulo: tarefa.titulo, data_prazo: tarefa.data_prazo, hora_prazo: tarefa.hora_prazo },
-      motivo
-    );
+    // Lembretes avulsos (#4/#8/#7): usa message_text direto
+    // Lembretes de tarefa: formata com base na tarefa
+    const texto =
+      (l as any).message_text ||
+      (tarefa
+        ? formatarLembrete(
+            { titulo: tarefa.titulo, data_prazo: tarefa.data_prazo, hora_prazo: tarefa.hora_prazo },
+            motivo,
+          )
+        : '');
+
+    if (!texto) {
+      await supabase
+        .from('lembretes_agendados')
+        .update({
+          cancelado_em: new Date().toISOString(),
+          erro: 'sem texto pra enviar',
+        })
+        .eq('id', l.id);
+      continue;
+    }
 
     try {
       await evolutionEnviarTexto(
