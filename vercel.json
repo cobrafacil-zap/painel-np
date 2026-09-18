@@ -26,6 +26,10 @@
     {
       "path": "/api/cron/lembretes-compromissos",
       "schedule": "0 10 * * *"
+    },
+    {
+      "path": "/api/cron/insights-mensais",
+      "schedule": "0 9 1 * *"
     }
   ]
 }
