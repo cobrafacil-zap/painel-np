@@ -13,6 +13,7 @@ import { tokenParaData, tokenParaHora } from '@/lib/datas';
 import { normalizarAcentos } from '@/lib/acentos';
 import { formatBRL, todayISO } from '@/lib/utils';
 import { getSession, setContext, clearContext } from '@/lib/whatsapp/session';
+import { detectarDuplicata, formatarMensagemDuplicata } from '@/lib/financeiro/dedup';
 import type { FinanceRecord } from '@/lib/types';
 
 // Fluid Compute: roda em São Paulo (gru1), perto do Contabo.
@@ -280,6 +281,49 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // === RESPOSTA A PROMPT PENDENTE (#3 dedup, #5 undo) ===
+  // Se o usuário respondeu "sim"/"não" e tem um pendingPrompt recente,
+  // executa a ação guardada.
+  if (instanceFromPayload && texto.trim().length <= 20) {
+    const sess = await getSession(userId, remoteJid, instanceFromPayload);
+    if (sess.pendingPrompt && sess.pendingPrompt.kind === 'dedup_confirm') {
+      const resp = texto.trim().toLowerCase();
+      if (/^(sim|s|yes|y|confirma|confirma|confere|pode\s+registrar|registra|e)$/i.test(resp)) {
+        // Usuário confirmou: insere o registro guardado
+        const payload = sess.pendingPrompt.payload as any;
+        const { error } = await supabase.from('records').insert({
+          user_id: userId,
+          module_id: 'financeiro',
+          type: 'gasto',
+          amount: payload.amount,
+          category: payload.category,
+          description: payload.description,
+          payment_method: payload.payment_method,
+          occurred_at: payload.occurred_at ?? todayISO(),
+          source: 'whatsapp',
+          source_message_id: messageId,
+          metadata: { remote_jid: remoteJid, dedup_confirmed: true },
+        });
+        await setContext(userId, remoteJid, instanceFromPayload, {
+          pendingPrompt: undefined,
+        } as any);
+        if (error) {
+          await safeSend(remoteJid, `⚠️ Erro ao salvar: ${error.message}`, instanceFromPayload);
+        } else {
+          await safeSend(remoteJid, `✅ Registrado (era outro mesmo).`, instanceFromPayload);
+        }
+        return NextResponse.json({ ok: true, intent: 'dedup_confirmed' });
+      }
+      if (/^(n[ãa]o|nao|n|no|cancela|cancelar|ignora|esquece)$/i.test(resp)) {
+        await setContext(userId, remoteJid, instanceFromPayload, {
+          pendingPrompt: undefined,
+        } as any);
+        await safeSend(remoteJid, `👍 Beleza, não registrei.`, instanceFromPayload);
+        return NextResponse.json({ ok: true, intent: 'dedup_cancelled' });
+      }
+    }
+  }
+
   // 3. ACK VISUAL em paralelo com parse IA.
   // O ack sai imediatamente (Evolution tem fila interna, entrega em ms),
   // o parser roda em paralelo. Quando o parser terminar, mandamos a
@@ -422,6 +466,48 @@ export async function POST(req: NextRequest) {
 
   if (parsed.intent === 'lancamento') {
     const p = parsed as Extract<typeof parsed, { intent: 'lancamento' }>;
+
+    // === Detecção de duplicata semântica (#3) ===
+    // Se for gasto E já existe um registro muito parecido recente,
+    // pergunta antes de inserir.
+    if (p.type === 'gasto' && instanceFromPayload) {
+      const dupe = await detectarDuplicata(userId, {
+        amount: p.amount,
+        category: p.category,
+        description: p.description,
+        payment_method: p.payment_method,
+        occurred_at: p.occurred_at ?? todayISO(),
+      });
+
+      if (dupe) {
+        // Grava pendingPrompt na sessão pra confirmar ou cancelar
+        const promptMsg = formatarMensagemDuplicata(dupe, {
+          amount: p.amount,
+          category: p.category,
+          description: p.description,
+          payment_method: p.payment_method,
+          occurred_at: p.occurred_at ?? todayISO(),
+        });
+        const sent = await safeSend(remoteJid, promptMsg, instanceFromPayload);
+        await setContext(userId, remoteJid, instanceFromPayload, {
+          pendingPrompt: {
+            kind: 'dedup_confirm',
+            promptMessageId: sent.id ?? '',
+            payload: {
+              amount: p.amount,
+              category: p.category,
+              description: p.description,
+              payment_method: p.payment_method,
+              occurred_at: p.occurred_at ?? todayISO(),
+              confidence: p.confidence,
+              existingRecordId: dupe.id,
+            },
+            ts: new Date().toISOString(),
+          },
+        });
+        return NextResponse.json({ ok: true, intent: 'lancamento', deduplicated: true });
+      }
+    }
 
     // Pre-monta a string de confirmação (sem await, é puro)
     const sinal = p.type === 'gasto' ? '−' : '+';
