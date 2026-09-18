@@ -51,9 +51,15 @@ export function formatarConfirmacaoTarefa(
   const lembretesLinha = (() => {
     if (lembretes.length === 0) return '🔔 Sem lembretes';
     if (t.tipo === 'compromisso') {
-      return lembretes.length >= 2
-        ? '🔔 Lembretes: 1 dia antes + 1h15 antes'
-        : '🔔 Lembrete: 1 dia antes';
+      if (t.recorrencia) {
+        return lembretes.length >= 2
+          ? '🔔 Lembretes: 1h15 antes + 30min antes'
+          : '🔔 Lembrete: 30min antes';
+      }
+      // Compromisso normal: 1 dia antes + 30min + 15min
+      if (lembretes.length >= 3) return '🔔 Lembretes: 1 dia antes + 30min + 15min antes';
+      if (lembretes.length === 2) return '🔔 Lembretes: 30min + 15min antes';
+      return '🔔 Lembrete: 15min antes';
     }
     // prazo
     return '🔔 Lembretes: 2 dias antes + manhã do dia';
@@ -73,7 +79,7 @@ export function formatarConfirmacaoTarefa(
  */
 export function formatarLembrete(
   t: Pick<Tarefa, 'titulo' | 'data_prazo' | 'hora_prazo'>,
-  motivo: 'aviso_previo' | 'aviso_imediato' | 'atraso_diario'
+  motivo: 'aviso_previo' | 'aviso_imediato' | 'aviso_30min' | 'aviso_15min' | 'aviso_curto' | 'atraso_diario'
 ): string {
   const hora = horaCurta(t.hora_prazo);
   const quando = hora
@@ -90,13 +96,38 @@ export function formatarLembrete(
 
   if (motivo === 'aviso_previo') {
     return (
-      `⏰ Lembrete: "${t.titulo}"\n` +
+      `⏰ Lembrete (amanhã): "${t.titulo}"\n` +
       `📅 ${quando}\n` +
       `💬 Responda "concluí" ou reage com ✅ pra marcar como feita.`
     );
   }
 
-  // aviso_imediato
+  if (motivo === 'aviso_curto') {
+    // Recorrente — 1h15 antes
+    return (
+      `🔔 Lembrete: "${t.titulo}"\n` +
+      `📅 ${quando} (em 1h15)\n` +
+      `💬 Responda "concluí" ou reage com ✅ pra marcar como feita.`
+    );
+  }
+
+  if (motivo === 'aviso_30min') {
+    return (
+      `🔔 Daqui a pouco: "${t.titulo}"\n` +
+      `📅 ${quando} (em 30min)\n` +
+      `💬 Responda "concluí" ou reage com ✅ pra marcar como feita.`
+    );
+  }
+
+  if (motivo === 'aviso_15min') {
+    return (
+      `⚡ Quase lá: "${t.titulo}"\n` +
+      `📅 ${quando} (em 15min)\n` +
+      `💬 Responda "concluí" ou reage com ✅ pra marcar como feita.`
+    );
+  }
+
+  // aviso_imediato (prazo — manhã do dia 8h)
   return (
     `🔔 Lembrete: "${t.titulo}"\n` +
     `📅 ${quando}\n` +

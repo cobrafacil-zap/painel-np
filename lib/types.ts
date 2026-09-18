@@ -120,7 +120,13 @@ export interface Tarefa {
 }
 
 export type ReminderCanal = 'whatsapp';
-export type ReminderMotivo = 'aviso_previo' | 'aviso_imediato' | 'atraso_diario';
+export type ReminderMotivo =
+  | 'aviso_previo'
+  | 'aviso_imediato'
+  | 'aviso_30min'
+  | 'aviso_15min'
+  | 'aviso_curto'
+  | 'atraso_diario';
 
 export interface LembreteAgendado {
   id: string;

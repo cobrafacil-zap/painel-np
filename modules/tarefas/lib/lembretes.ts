@@ -1,10 +1,15 @@
 /**
  * Agendamento e disparo de lembretes de tarefas.
  *
- * Regras (definidas com o usuário):
- *  - Compromisso (tem hora):
+ * Regras (definidas com o usuário — versão expandida):
+ *  - Compromisso (tem hora, não-recorrente):
  *      - aviso_previo: 1 dia antes, MESMO horário.
- *      - aviso_imediato: 1h15 antes do compromisso.
+ *      - aviso_30min:  30 minutos antes.
+ *      - aviso_15min:  15 minutos antes.
+ *  - Compromisso recorrente (semanal/mensal):
+ *      - aviso_curto:  1h15 antes.
+ *      - aviso_30min: 30 minutos antes.
+ *      (sem aviso de 1 dia — recorrente geralmente já tá no calendário.)
  *  - Prazo (só data):
  *      - aviso_previo: 2 dias antes às 08:00 local.
  *      - aviso_imediato: manhã do dia (08:00 local).
@@ -20,14 +25,20 @@ import { evolutionEnviarTexto } from '@/lib/evolution';
 import type { Tarefa, LembreteAgendado } from '@/lib/types';
 import { formatarLembrete } from './mensagens';
 
-type ReminderMotivo = 'aviso_previo' | 'aviso_imediato' | 'atraso_diario';
+type ReminderMotivo =
+  | 'aviso_previo'
+  | 'aviso_imediato'
+  | 'aviso_30min'
+  | 'aviso_15min'
+  | 'aviso_curto'
+  | 'atraso_diario';
 
 type TarefaComJornada = Tarefa & {
   profile: { whatsapp_group_jid: string | null; evolution_instance_name: string | null } | null;
 };
 
 /**
- * Gera os 2 lembretes iniciais de uma tarefa recém-criada.
+ * Gera os lembretes iniciais de uma tarefa recém-criada.
  * Retorna os IDs das linhas inseridas em lembretes_agendados.
  */
 export async function gerarLembretesIniciais(tarefaId: string): Promise<string[]> {
@@ -47,15 +58,31 @@ export async function gerarLembretesIniciais(tarefaId: string): Promise<string[]
   const dataBase = parseDataHora(tarefa.data_prazo, tarefa.hora_prazo);
 
   if (tarefa.tipo === 'compromisso' && dataBase) {
-    // aviso_previo: 1 dia antes, mesmo horário
-    const avisoPrevio = new Date(dataBase);
-    avisoPrevio.setDate(avisoPrevio.getDate() - 1);
-    linhas.push({ motivo: 'aviso_previo', disparar_em: avisoPrevio.toISOString() });
+    if (tarefa.recorrencia) {
+      // Compromisso recorrente: só curto prazo (1h15 + 30min antes).
+      // Não gera aviso de 1 dia porque recorrente geralmente já tá no
+      // calendário mental do usuário.
+      const aviso1h15 = new Date(dataBase);
+      aviso1h15.setMinutes(aviso1h15.getMinutes() - 75);
+      linhas.push({ motivo: 'aviso_curto', disparar_em: aviso1h15.toISOString() });
 
-    // aviso_imediato: 1h15 antes
-    const avisoImediato = new Date(dataBase);
-    avisoImediato.setMinutes(avisoImediato.getMinutes() - 75);
-    linhas.push({ motivo: 'aviso_imediato', disparar_em: avisoImediato.toISOString() });
+      const aviso30 = new Date(dataBase);
+      aviso30.setMinutes(aviso30.getMinutes() - 30);
+      linhas.push({ motivo: 'aviso_30min', disparar_em: aviso30.toISOString() });
+    } else {
+      // Compromisso normal: 3 avisos (1 dia antes + 30min + 15min).
+      const avisoPrevio = new Date(dataBase);
+      avisoPrevio.setDate(avisoPrevio.getDate() - 1);
+      linhas.push({ motivo: 'aviso_previo', disparar_em: avisoPrevio.toISOString() });
+
+      const aviso30 = new Date(dataBase);
+      aviso30.setMinutes(aviso30.getMinutes() - 30);
+      linhas.push({ motivo: 'aviso_30min', disparar_em: aviso30.toISOString() });
+
+      const aviso15 = new Date(dataBase);
+      aviso15.setMinutes(aviso15.getMinutes() - 15);
+      linhas.push({ motivo: 'aviso_15min', disparar_em: aviso15.toISOString() });
+    }
   } else if (tarefa.tipo === 'prazo') {
     // aviso_previo: 2 dias antes às 08:00
     const [y, m, d] = tarefa.data_prazo.split('-').map(Number);
