@@ -14,6 +14,10 @@ do $$ begin
   alter type public.reminder_motivo add value if not exists 'insight_mensal';
 exception when duplicate_object then null; end $$;
 
+do $$ begin
+  alter type public.reminder_motivo add value if not exists 'relatorio_diario';
+exception when duplicate_object then null; end $$;
+
 -- Estende lembretes_agendados pra suportar mensagens avulsas (sem
 -- tarefa_id) e vinculação a compromisso_parcelas.
 alter table public.lembretes_agendados

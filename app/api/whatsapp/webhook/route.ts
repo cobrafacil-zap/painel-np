@@ -5,6 +5,14 @@ import { responderConsulta } from '@/modules/financeiro/lib/consultas';
 import { executarAcao } from '@/modules/financeiro/lib/acoes';
 import { criarCompromisso, resumoCompromissos, listarParcelas, marcarParcelaPaga } from '@/modules/financeiro/lib/compromissos';
 import { setOrcamento, getOrcamento, deleteOrcamento } from '@/modules/financeiro/lib/orcamentos';
+import {
+  setMetaDiaria,
+  getMetaDiaria,
+  deleteMetaDiaria,
+  getGastoHoje,
+  formatarIndicadorMeta,
+  checarAvisoMetaDiaria,
+} from '@/lib/financeiro/meta-diaria';
 import { parseTarefa } from '@/modules/tarefas/lib/parser-mensagem';
 import { criarTarefa, concluirTarefaPorTexto, concluirPorReaction } from '@/modules/tarefas/lib/acoes';
 import { mensagemAmbiguidade } from '@/modules/tarefas/lib/mensagens';
@@ -182,14 +190,11 @@ export async function POST(req: NextRequest) {
     if (audioBase64) {
       const mimeType = audioMsg.mimetype ?? 'audio/ogg';
       console.log(`[webhook] transcrevendo áudio (${audioMsg.seconds ?? '?'}s, ${mimeType})`);
-      const ackPromise = safeSend(remoteJid, `🎙️ Transcrevendo…`, instanceFromPayload);
       const transcricao = await transcreverAudio(audioBase64, mimeType);
       if (transcricao) {
         console.log(`[webhook] transcrição: "${transcricao.slice(0, 80)}"`);
         Object.assign(message, { conversation: transcricao, __transcribed: true });
-        await ackPromise;
       } else {
-        await ackPromise;
         await safeSend(remoteJid, '⚠️ Não consegui transcrever o áudio. Tente enviar em texto.', instanceFromPayload);
         return NextResponse.json({ ok: true, skipped: 'transcribe_failed' });
       }
@@ -216,14 +221,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, skipped: true });
   }
 
-  // Loop guard: se o texto é uma das nossas próprias respostas (acks/erros
+  // Loop guard: se o texto é uma das nossas próprias respostas (confirmações
   // que o bot mandou pro grupo), ignora. Sem isso, o bot lê a própria
   // resposta como input, falha no parser, manda "Erro ao interpretar",
   // que vira input de novo → loop infinito. Esse padrão é único o suficiente
   // pra ser seguro como filtro.
   const isOwnBotReply =
-    texto.startsWith('⏳') ||
-    texto.startsWith('🎙️') ||
     texto.startsWith('✅') ||
     texto.startsWith('⚠️') ||
     texto.startsWith('🤔') ||
@@ -415,11 +418,9 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // 3. ACK VISUAL em paralelo com parse IA.
-  // O ack sai imediatamente (Evolution tem fila interna, entrega em ms),
-  // o parser roda em paralelo. Quando o parser terminar, mandamos a
-  // confirmação detalhada.
-  const ackPromise = safeSend(remoteJid, `⏳ Anotando…`, instanceFromPayload);
+  // 3. Sem ack visual — o bot só fala a confirmação final com a tarefa
+  // já feita. Sem "⏳ Anotando…" pra reduzir chance de duplo-disparo
+  // e ruído no grupo.
 
   // === CLASSIFICADOR DE MÓDULO (regex local, custo zero) ===
   // Decide qual parser chamar: financeiro (existente) ou tarefas (novo).
@@ -455,13 +456,9 @@ export async function POST(req: NextRequest) {
     }
   } catch (e: any) {
     console.error('parser error:', e);
-    await ackPromise;
     await safeSend(remoteJid, '⚠️ Erro ao interpretar. Tente reformular.', instanceFromPayload);
     return NextResponse.json({ ok: true, error: 'parser' });
   }
-
-  // Garante que o "⏳" saiu antes da confirmação
-  await ackPromise;
 
   // 4. Roteamento por intent
   // === Tarefas ===
@@ -656,6 +653,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, error: isDupe ? 'duplicate' : 'db' });
     }
 
+    // Aviso de meta diária (#extra) — checa se cruzou 80%/100% com esse gasto
+    if (p.type === 'gasto' && instanceFromPayload) {
+      const aviso = await checarAvisoMetaDiaria(
+        userId,
+        remoteJid,
+        instanceFromPayload,
+      );
+      if (aviso) {
+        await safeSend(remoteJid, aviso, instanceFromPayload);
+      }
+    }
+
     return NextResponse.json({ ok: true, intent: 'lancamento', id: (inserted as FinanceRecord).id });
   }
 
@@ -807,6 +816,37 @@ export async function POST(req: NextRequest) {
     }
     await safeSend(remoteJid, result.reply, instanceFromPayload);
     return NextResponse.json({ ok: true, intent: o.intent });
+  }
+
+  // === META DIÁRIA (#extra) ===
+  if (
+    parsed.intent === 'meta_diaria_set' ||
+    parsed.intent === 'meta_diaria_get' ||
+    parsed.intent === 'meta_diaria_delete'
+  ) {
+    const m = parsed as Extract<
+      typeof parsed,
+      { intent: 'meta_diaria_set' | 'meta_diaria_get' | 'meta_diaria_delete' }
+    >;
+    let result: { reply: string; ok: boolean };
+    if (m.intent === 'meta_diaria_set') {
+      result = await setMetaDiaria(userId, m.amount ?? 0);
+    } else if (m.intent === 'meta_diaria_get') {
+      const meta = await getMetaDiaria(userId);
+      if (meta == null) {
+        result = { reply: '🤷 Nenhuma meta diária definida. Manda "definir meta diária de 100".', ok: false };
+      } else {
+        const gasto = await getGastoHoje(userId);
+        result = {
+          reply: `🎯 Meta diária: ${formatarIndicadorMeta(meta, gasto)}`,
+          ok: true,
+        };
+      }
+    } else {
+      result = await deleteMetaDiaria(userId);
+    }
+    await safeSend(remoteJid, result.reply, instanceFromPayload);
+    return NextResponse.json({ ok: true, intent: m.intent });
   }
 
   return NextResponse.json({ ok: true, skipped: true });

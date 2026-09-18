@@ -50,6 +50,11 @@ export type ParsedIntent =
       amount?: number;
     }
   | {
+      intent: 'meta_diaria_set' | 'meta_diaria_get' | 'meta_diaria_delete';
+      confidence: number;
+      amount?: number;
+    }
+  | {
       intent: 'outro';
       confidence: number;
     };
@@ -295,6 +300,61 @@ function tentarParseLocal(texto: string): ParsedIntent | null {
     }
   }
 
+  // === META DIÁRIA (#extra) — checa ANTES do orcamento genérico pra
+  // evitar capturar "qual minha meta diária?" como orcamento_get.
+  // Variações aceitas:
+  //   "definir meta diária de 100" / "meta diaria de 80 reais" /
+  //   "limite diario 150" / "minha meta diaria é 100"
+  const metaDiariaSetMatch = tl.match(
+    /^(?:definir?|set|fixar|colocar?|criar?|limite|minha)\s+(?:meta|limite)\s+(?:de\s+)?(?:gasto\s+)?(?:di[áa]ri[ao]|dia|de\s+dia)\s+(?:de\s+|[:eé]\s+)?(?:reais?\s+)?(\d+(?:[,\.]\d+)?)/i,
+  );
+  if (metaDiariaSetMatch) {
+    const valor = parseFloat(metaDiariaSetMatch[1].replace(',', '.'));
+    return {
+      intent: 'meta_diaria_set',
+      confidence: 0.92,
+      amount: valor,
+    };
+  }
+  // "meta diaria de 80 reais" / "limite diario 150" (sem verbo/possessivo antes)
+  const metaDiariaSetMatchAlt = tl.match(
+    /^(?:meta|limite)\s+(?:de\s+)?(?:gasto\s+)?(?:di[áa]ri[ao]|dia|de\s+dia)\s+(?:de\s+|[:eé]\s+)?(\d+(?:[,\.]\d+)?)\s*(?:reais?)?$/i,
+  );
+  if (metaDiariaSetMatchAlt) {
+    const valor = parseFloat(metaDiariaSetMatchAlt[1].replace(',', '.'));
+    return {
+      intent: 'meta_diaria_set',
+      confidence: 0.9,
+      amount: valor,
+    };
+  }
+  // "gastar até 100 por dia" / "limite de 150 por dia"
+  const metaDiariaSetMatch2 = tl.match(
+    /^(?:gastar?|limite)\s+(?:at[eé]|de)\s+(\d+(?:[,\.]\d+)?)\s+por\s+dia$/i,
+  );
+  if (metaDiariaSetMatch2) {
+    const valor = parseFloat(metaDiariaSetMatch2[1].replace(',', '.'));
+    return {
+      intent: 'meta_diaria_set',
+      confidence: 0.88,
+      amount: valor,
+    };
+  }
+  // "qual minha meta diária?" / "como tá minha meta diária"
+  if (/qual\s+(?:[ée]\s+)?(?:minha\s+)?meta\s+(?:di[áa]ria|di[áa]rio|de\s+dia)|como\s+t[áa]\s+(?:minha\s+)?meta\s+(?:di[áa]ria|di[áa]rio)/i.test(tl)) {
+    return {
+      intent: 'meta_diaria_get',
+      confidence: 0.92,
+    };
+  }
+  // "remover meta diária" / "tirar limite diário"
+  if (/^(?:remover?|tirar|deletar|apagar|excluir)\s+(?:meta|limite)\s+(?:di[áa]ria|di[áa]rio|de\s+dia)$/i.test(tl)) {
+    return {
+      intent: 'meta_diaria_delete',
+      confidence: 0.93,
+    };
+  }
+
   // === ORÇAMENTO / META (#10) ===
   // "definir meta de 600 pra mercado" / "orçamento de 800 pra lazer" /
   // "fixar meta de 500 em transporte"
@@ -324,6 +384,7 @@ function tentarParseLocal(texto: string): ParsedIntent | null {
     };
   }
   // "quanto falta pra meta de mercado?" / "como tá minha meta de lazer?"
+  // Só entra aqui se NÃO bateu como meta diária lá em cima.
   if (/quanto\s+(?:falta|sobra|tenho)|como\s+(?:t[áa]|esta|est[áa])|status\s+(?:de\s+)?meta|minha\s+meta/i.test(tl)) {
     const orcGetMatch = tl.match(/(?:meta|orcamento|or[çc]amento)\s+(?:de|do|da)?\s*([a-záàãâéêíóôõúüç]+)/i);
     if (orcGetMatch) {
