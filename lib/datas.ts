@@ -10,6 +10,7 @@
  * quem converte pra ISO é esta lib. Isso permite ao Groq devolver tokens
  * estáveis sem precisar calcular datas (que é onde ele mais erra).
  */
+import { normalizarAcentos } from './acentos';
 
 export type TokenData =
   | 'HOJE'
@@ -38,13 +39,17 @@ export type TokenHora =
 /**
  * Converte um token de data em `YYYY-MM-DD` no fuso local do servidor
  * (BR, gru1 = UTC-3). Aceita tokens opacos do parser + tokens crus do
- * regex local.
+ * regex local. Aplica normalizarAcentos pra tolerar tokens acentuados
+ * (ex: 'AMANHÃ' → 'AMANHA') porque o Groq às vezes devolve com acento
+ * e `toUpperCase()` não normaliza Latin-1.
  *
  * @returns ISO date ou null se o token não for reconhecido.
  */
 export function tokenParaData(token: string | null | undefined): string | null {
   if (!token) return null;
-  const t = String(token).toUpperCase().trim();
+  // IMPORTANTE: normalizar acentos ANTES de toUpperCase, porque
+  // 'AMANHÃ'.toUpperCase() continua 'AMANHÃ' (V8 não normaliza).
+  const t = normalizarAcentos(String(token).toUpperCase()).trim();
 
   // Zera o horário pra comparar só a data
   const hoje = new Date();
