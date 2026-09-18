@@ -21,7 +21,7 @@ export function AppShell({
   const [open, setOpen] = useState(false);
 
   return (
-    <div className="min-h-dvh flex">
+    <div className="min-h-dvh min-w-0 max-w-full flex">
       <Sidebar open={open} onClose={() => setOpen(false)} profile={profile} />
 
       <div className="flex-1 min-w-0 flex flex-col">
@@ -32,7 +32,7 @@ export function AppShell({
           right={topbar?.right}
         />
 
-        <main className="flex-1 px-4 sm:px-6 md:px-8 py-4 sm:py-6 md:py-8 min-w-0">
+        <main className="flex-1 px-4 sm:px-6 md:px-8 py-4 sm:py-6 md:py-8 min-w-0 max-w-full overflow-x-hidden">
           {children}
         </main>
       </div>

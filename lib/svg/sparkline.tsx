@@ -1,16 +1,17 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 /**
  * Sparkline SVG com curva smooth (cubic bezier) e animação de desenho.
+ * `width` é opcional — se omitido, usa a largura do container (responsivo).
  *
  * @example
  *   <Sparkline data={[10, 20, 15, 30, 25, 35, 40]} labels={['Seg', ...]} />
  */
 export function Sparkline({
   data,
-  width = 320,
+  width: widthProp,
   height = 80,
   color = '#22c55e',
   fill = true,
@@ -23,6 +24,24 @@ export function Sparkline({
   fill?: boolean;
   labels?: string[];
 }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [responsiveWidth, setResponsiveWidth] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || widthProp !== undefined) return;
+    const el = containerRef.current;
+    if (!el) return;
+    const update = () => {
+      setResponsiveWidth(el.getBoundingClientRect().width || 320);
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [widthProp]);
+
+  const width = widthProp ?? responsiveWidth ?? 320;
+
   const { path, areaPath, max } = useMemo(() => {
     if (data.length === 0) return { path: '', areaPath: '', max: 0 };
     const max = Math.max(...data, 1);
@@ -65,7 +84,7 @@ export function Sparkline({
   }
 
   return (
-    <div className="w-full">
+    <div ref={containerRef} className="w-full">
       <svg
         viewBox={`0 0 ${width} ${height}`}
         width="100%"

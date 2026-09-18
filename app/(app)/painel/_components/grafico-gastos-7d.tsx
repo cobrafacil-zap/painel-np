@@ -32,7 +32,7 @@ export function GraficoGastos7d({
       </header>
 
       <div className="flex-1 flex items-center min-h-[120px]">
-        <Sparkline data={data} labels={labels} color="#ef4444" width={400} height={120} />
+        <Sparkline data={data} labels={labels} color="#ef4444" height={120} />
       </div>
 
       <div className="flex justify-between text-[11px] text-zinc-500 mt-3 pt-3 border-t border-white/[0.04] gap-2 flex-wrap">

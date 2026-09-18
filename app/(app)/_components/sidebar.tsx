@@ -63,9 +63,15 @@ export function Sidebar({ open, onClose, profile }: SidebarProps) {
           'bg-bg-soft md:bg-bg-soft',
           'border-r border-border p-4 flex flex-col gap-1',
           'transition-transform duration-200 ease-out',
-          open ? 'translate-x-0' : '-translate-x-full md:translate-x-0',
+          // Mobile: quando fechada, esconde totalmente (visibility + opacity)
+          // pra iOS Safari não tentar scroll horizontal no "vazio" à esquerda.
+          // Desktop: sempre visível (`md:visible md:opacity-100`).
+          open
+            ? 'translate-x-0 visible opacity-100'
+            : '-translate-x-full md:translate-x-0 invisible opacity-0 md:visible md:opacity-100',
           'md:translate-x-0'
         )}
+        aria-hidden={!open}
       >
         {/* Header (com botão X no mobile) */}
         <div className="mb-6 flex items-start justify-between">
