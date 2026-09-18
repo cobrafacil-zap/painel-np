@@ -530,12 +530,12 @@ export async function POST(req: NextRequest) {
   // existe uma consulta recente na sessão. Se sim, injeta como contexto pro
   // Groq re-interpretar a frase como refinamento ("e mês passado?",
   // "que dia foi?", "e dividido por categoria?").
-  if ((parsed.intent === 'outro' || parsed.confidence < 0.6) && instanceFromPayload) {
+  if ((parsed.intent === 'outro' || parsed.confidence < 0.75) && instanceFromPayload) {
     const sess = await getSession(userId, remoteJid, instanceFromPayload);
     if (sess.lastQuery && texto.trim().length <= 60) {
       const enriched = `Contexto da última pergunta do usuário: ele acabou de perguntar "${sess.lastQuery.tipo}" no período "${sess.lastQuery.periodo}"${sess.lastQuery.categoriaLabel ? ` filtrando por "${sess.lastQuery.categoriaLabel}"` : ''}. A mensagem de agora dele é: "${texto}".\n\nSe a mensagem nova for um refinamento da última pergunta (mudar período, dividir por categoria, etc), retorne intent="consulta" reaproveitando os campos relevantes. Caso contrário, retorne intent="outro".`;
       const reParsed = await parseMensagem(enriched);
-      if (reParsed.intent !== 'outro' && reParsed.confidence >= 0.6) {
+      if (reParsed.intent !== 'outro' && reParsed.confidence >= 0.75) {
         parsed = reParsed;
         // Re-roteia pelo handler de consulta
         if (parsed.intent === 'consulta') {
@@ -550,13 +550,28 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  if (parsed.intent === 'outro' || parsed.confidence < 0.6) {
+  if (parsed.intent === 'outro' || parsed.confidence < 0.75) {
     await safeSend(
       remoteJid,
       '🤔 Não entendi. Pode reformular?\n\nExemplos:\n• "gastei 50 no mercado"\n• "recebi 1500 de freelance"\n• "quanto gastei esse mês?"',
       instanceFromPayload,
     );
     return NextResponse.json({ ok: true, intent: 'outro' });
+  }
+
+  // Validação cruzada de lancamento — se o Groq retornou amount=0 ou
+  // inválido, ignora a interpretação e pede reformulação.
+  if (parsed.intent === 'lancamento') {
+    const p = parsed as Extract<typeof parsed, { intent: 'lancamento' }>;
+    if (!Number.isFinite(p.amount) || p.amount <= 0) {
+      console.warn(`[webhook] lancamento inválido (amount=${p.amount})`);
+      await safeSend(
+        remoteJid,
+        '🤔 Não consegui identificar o valor. Tenta de novo tipo "gastei 50 no mercado".',
+        instanceFromPayload,
+      );
+      return NextResponse.json({ ok: true, error: 'invalid_amount' });
+    }
   }
 
   if (parsed.intent === 'lancamento') {

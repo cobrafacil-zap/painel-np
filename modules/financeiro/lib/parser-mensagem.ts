@@ -203,6 +203,7 @@ REGRAS CRÍTICAS (NUNCA ESQUEÇA)
 • "tenho uma conta de X de N reais" / "pago N de X" / "X tá N" / "X custa N" → lancamento gasto recorrente (categoria conforme X: internet/luz/água/gás/telefone = contas_casa, aluguel/condomínio = moradia, academia = saude, streaming = assinaturas).
 • CONTAS FIXAS MENSais (luz, água, gás, internet, telefone, TV a cabo) → categoria "contas_casa". Aluguel/condomínio/IPTU → "moradia". Streaming (Netflix, Spotify) → "assinaturas". Academia/plano de saúde → "saude". Mesmo sem verbo explícito, "conta de X de N" é gasto.
 • CONFIDENCE: 0.95+ para casos claros. 0.7-0.9 se tem ambiguidade. <0.7 só se realmente não dá pra saber.
+• Em caso de dúvida REAL (frase ambígua, valores conflitantes, sem verbo claro), retorne intent="outro" com confidence < 0.5. É melhor pedir reformulação do que registrar errado.
 • NÃO escreva markdown, comentários, explicações — SOMENTE o JSON.
 • NÃO use aspas escapadas inválidas. Use aspas duplas normais.
 
