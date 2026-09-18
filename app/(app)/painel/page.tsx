@@ -6,6 +6,7 @@ import { TarefasProximas } from './_components/tarefas-proximas';
 import { GraficoGastos7d } from './_components/grafico-gastos-7d';
 import { HeatmapAtividade } from './_components/heatmap-atividade';
 import { TopCategorias } from './_components/top-categorias';
+import { ContasMoradia } from './_components/contas-moradia';
 import { AtalhosRapidos } from './_components/atalhos-rapidos';
 import { InstallPWAButton } from './_components/install-pwa-button';
 import { PageHeader } from '../_components/page-header';
@@ -160,7 +161,10 @@ export default async function PainelPage() {
         </div>
       </div>
 
-      <TopCategorias data={topCategorias} />
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-5">
+        <TopCategorias data={topCategorias} />
+        <ContasMoradia refreshKey={0} />
+      </div>
     </div>
   );
 }

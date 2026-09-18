@@ -58,9 +58,10 @@ contas_casa, assinaturas, freelance, salario, investimentos, posto, cartao_credi
 DISTINÇÃO IMPORTANTE:
 - "moradia" = aluguel, condomínio, IPTU, financiamento imobiliário (gastos
   com o imóvel em si).
-- "contas_casa" = luz, água, gás, internet, telefone, TV a cabo (utilities
-  recorrentes da casa). SEMPRE categoria "contas_casa" quando o usuário
-  falar "conta de luz/água/internet" ou só "luz/água/internet".
+- "contas_casa" = luz, energia, água, gás, internet, wifi, fibra, telefone,
+  celular, TV a cabo, banda larga. SEMPRE "contas_casa" quando o usuário
+  falar "conta de luz/água/internet/net/telefone/celular" ou só "luz/água/
+  internet". "net" sozinho (ex: "net 100 reais") = internet = contas_casa.
 - "assinaturas" = Netflix, Spotify, streaming, serviços digitais (não conta
   de casa física).
 
@@ -452,7 +453,9 @@ function tentarParseLocal(texto: string): ParsedIntent | null {
     let category: string | null = null;
     if (/\b(aluguel|condom[ií]nio|iptu|prestação|prestacao|financ[aã]mento|im[óo]vel)/i.test(t)) {
       category = 'moradia';
-    } else if (/\b(luz|energia|enel|cemig|cpfl|elektro|água|agua|sabesp|copasa|g[áa]s|comg[áa]s|internet|wifi|wi-fi|net\b|banda\s+larga|fibra|telefone|celular|tv\s+a\s+cabo|sky|claro\s+tv|net\s+combo)/i.test(t)) {
+    } else if (
+      /\b(luz|energia|elétrica|eletrica|água|agua|g[áa]s|conta\s+de\s+(?:luz|agua|água|g[áa]s|internet|net|telefone|celular|tv)|internet|wifi|wi-fi|fibra|banda\s+larga|telefone|celular|plano\s+(?:de\s+)?(?:telefone|celular)|tv\s+(?:a\s+cabo|por\s+assinatura)|net\b|net\s+combo)/i.test(t)
+    ) {
       category = 'contas_casa';
     } else if (/\b(netflix|spotify|streaming|amazon\s+prime|disney|hbo|apple\s+music|deezer|youtube\s+premium)/i.test(t)) {
       category = 'assinaturas';
@@ -482,8 +485,11 @@ function tentarParseLocal(texto: string): ParsedIntent | null {
   else if (/\buber|99|taxi|ônibus|onibus|metro|metrô/i.test(t)) category = 'transporte';
   else if (/\bifood|i?food|restaurante|lanche|almoço|almoco|jantar|delivery|comida|café|cafe|pizza|hamb[úu]rguer/i.test(t)) category = 'alimentacao';
   else if (/\baluguel|condom[ií]nio|iptu|prestação|prestacao|financ[aã]mento|im[óo]vel\b/i.test(t)) category = 'moradia';
-  else if (/\b(luz|energia|enel|cemig|cpfl|elektro|água|agua|sabesp|copasa|g[áa]s|comg[áa]s|telefone|celular|tv\s+a\s+cabo|sky|claro\s+tv|net\s+combo)/i.test(t)) category = 'contas_casa';
-  else if (/\binternet|wifi|wi-fi|net\b|banda\s+larga|fibra/i.test(t)) category = 'contas_casa';
+  else if (
+    // === CONTAS DE MORADIA (unificado) ===
+    // Energia, água, gás, internet, telefone, TV, condomínio
+    /\b(luz|energia|elétrica|eletrica|água|agua|g[áa]s|conta\s+de\s+(?:luz|agua|água|g[áa]s|internet|net|telefone|celular|tv)|internet|wifi|wi-fi|fibra|banda\s+larga|telefone|celular|plano\s+(?:de\s+)?(?:telefone|celular)|tv\s+(?:a\s+cabo|por\s+assinatura)|net\b|net\s+combo)/i.test(t)
+  ) category = 'contas_casa';
   else if (/\bnetflix|spotify|streaming|amazon\s+prime|disney|hbo|apple\s+music|deezer|youtube\s+premium/i.test(t)) category = 'assinaturas';
   else if (/\bfarm[áa]cia|rem[ée]dio|m[ée]dico|hospital|academia/i.test(t)) category = 'saude';
   else if (/\bcinema|show|festa|viagem|jogo|bar\b|balada/i.test(t)) category = 'lazer';
