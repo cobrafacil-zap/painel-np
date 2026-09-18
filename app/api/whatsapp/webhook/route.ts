@@ -583,6 +583,10 @@ async function safeSend(
  *  - Marcador forte de tarefa SEM verbo financeiro → tarefas.
  *  - Marcador de tarefa + verbo financeiro sem valor → AMBÍGUO (deixa
  *    pro parseTarefa decidir via motivo=financeiro_ou_tarefa).
+ *  - Mensagem só com data/hora (sem verbo) → tarefas (é claramente um
+ *    lembrete/compromisso: "Amanhã às 14h", "sexta reunião" sem verbo,
+ *    "amanhã dentista"). Sem isso, cai em "outro" e o financeiro dá
+ *    timeout ou devolve intent=outro.
  *  - Sem marcadores fortes → outro.
  */
 function classificarModulo(texto: string): 'financeiro' | 'tarefas' | 'outro' {
@@ -600,6 +604,18 @@ function classificarModulo(texto: string): 'financeiro' | 'tarefas' | 'outro' {
       t
     );
 
+  // Tem alguma coisa que parece data (sem verbo): "Amanhã às 10h",
+  // "sexta 14h", "amanhã dentista", "amanhã" puro.
+  const temDataRelativa =
+    /\b(hoje|amanh[ãa]|semana\s+que\s+vem|m[êe]s\s+que\s+vem|fim\s+(?:do|d[eo])\s+m[êe]s|segunda|ter[çc]a|quarta|quinta|sexta|s[áa]bado|domingo|daqui\s+a\s+\d+\s+dias?|pr[óo]ximo\s+dia\s+\d+|\bdia\s+\d{1,2})\b/i.test(
+      t
+    );
+  // Tem hora explícita: "14h", "14:30", "às 10", "de manhã", "de tarde", "de noite".
+  const temHoraExplicita =
+    /\b(?:[àa]s?\s+\d{1,2}(?:h(?:\d{2})?|:\d{2})|de\s+(?:manh[ãa]|tarde|noite)|\d{1,2}h(?:\d{2})?|\d{1,2}:\d{2})\b/i.test(
+      t
+    );
+
   // Financeiro forte: verbo financeiro + valor
   if (temVerboFinanceiro && temValorMonetario) return 'financeiro';
   // Financeiro sem tarefa: "paguei a conta" sem "fazer reunião"
@@ -609,6 +625,11 @@ function classificarModulo(texto: string): 'financeiro' | 'tarefas' | 'outro' {
   // Ambíguo: marcador de tarefa + verbo financeiro sem valor → tarefas
   // (parseTarefa vai detectar como tarefa_ambigua motivo=financeiro_ou_tarefa)
   if (temMarcadorTarefa && temVerboFinanceiro && !temValorMonetario) return 'tarefas';
+  // Sem verbo mas com (data + hora) ou só data explícita → tarefas.
+  // Frases como "Amanhã às 10hrs da manhã", "sexta 14h", "amanhã dentista"
+  // são claramente lembretes/compromissos, não financeiro.
+  // Só data pura sem hora também entra (vira tarefa tipo "prazo").
+  if ((temDataRelativa || temHoraExplicita) && !temVerboFinanceiro) return 'tarefas';
   // Sem marcadores fortes
   return 'outro';
 }

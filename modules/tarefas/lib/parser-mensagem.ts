@@ -154,11 +154,27 @@ function tentarParseLocalTarefa(texto: string): TarefaParsedIntent | null {
     /\b(tenho que|preciso|vou\s+(?:fazer|ir|ligar|entregar|marcar|lembrar)|lembrar|lembrete|reuni[ãa]o|entregar|ligar|anotar|anota|agendar|marcar|campanha)\b/i.test(
       tl
     );
-  if (!temMarcadorForte) return null;
 
   // Marcador suave (sem exigir) — cobre "fazer X" mas classifica como tarefa_ambigua
   // se não tiver marcador forte.
   const temMarcadorSuave = /\b(fazer|ir|chamar|mandar|responder|enviar|buscar)\b/i.test(tl);
+
+  // Detecta data/hora explícita. Usado pra aceitar mensagens SEM marcador
+  // de tarefa mas COM data/hora (ex: "Amanhã às 10h", "sexta 14h",
+  // "amanhã dentista"). Sem isso, o pré-parser rejeitava essas frases e
+  // elas caíam direto no Groq, que erra.
+  const temDataOuHora =
+    /\b(hoje|amanh[ãa]|semana\s+que\s+vem|m[êe]s\s+que\s+vem|fim\s+(?:do|d[eo])\s+m[êe]s|segunda|ter[çc]a|quarta|quinta|sexta|s[áa]bado|domingo|daqui\s+a\s+\d+\s+dias?|pr[óo]ximo\s+dia\s+\d+|\bdia\s+\d{1,2})\b/i.test(
+      t
+    ) ||
+    /\b(?:[àa]s?\s+\d{1,2}(?:h(?:\d{2})?|:\d{2})|de\s+(?:manh[ãa]|tarde|noite)|\d{1,2}h(?:\d{2})?|\d{1,2}:\d{2})\b/i.test(
+      t
+    );
+
+  // Sem marcador forte E sem data/hora explícita → não é tarefa (deixa
+  // pro Groq ou cai em "outro"). Esse é o caso de "fazer a campanha" sem
+  // data, que vira tarefa_ambigua sem_data quando Groq processa.
+  if (!temMarcadorForte && !temDataOuHora) return null;
 
   // Recorrência
   let recorrencia: 'semanal' | 'mensal' | null = null;
@@ -268,19 +284,36 @@ function tentarParseLocalTarefa(texto: string): TarefaParsedIntent | null {
   const titulo = tituloLimpo.charAt(0).toUpperCase() + tituloLimpo.slice(1);
 
   // === Decisões de retorno ===
-  // Sem data E sem recorrência → tarefa_ambigua sem_data (ou sem_data_com_hora se tem hora)
-  if (!data_token && !recorrencia) {
+  // Sem data E sem recorrência E sem marcador forte → tarefa_ambigua
+  // sem_data (ou sem_data_com_hora se tem hora). Mensagens curtas tipo
+  // "Amanhã às 10h" já têm data_token (AMANHA), então não caem aqui.
+  // Caem aqui: "fazer a campanha" (sem data), "ligar pra cliente às 16h"
+  // (sem dia, só hora).
+  if (!data_token && !recorrencia && !temDataOuHora) {
     const motivo: 'sem_data' | 'sem_data_com_hora' =
       horaStr ? 'sem_data_com_hora' : 'sem_data';
     return { intent: 'tarefa_ambigua', confidence: 0.88, motivo };
   }
 
+  // Se chegou aqui, temos data_token OU recorrencia OU temDataOuHora.
+  // Se não temos marcador forte mas a frase é "só data/hora" (sem verbo),
+  // geramos um título genérico baseado no que sobrou.
+  let tituloFinal = titulo;
+  if (!temMarcadorForte && (!titulo || titulo === t || titulo.length < 3)) {
+    // Título vazio ou idêntico ao texto original. Tenta usar o que sobrou
+    // depois de remover data/hora. Se sobrar só "às 10h", usa fallback.
+    tituloFinal =
+      tituloLimpo && tituloLimpo.length >= 3
+        ? titulo.charAt(0).toUpperCase() + tituloLimpo.slice(1)
+        : 'Lembrete';
+  }
+
   // Se marcador é só suave (sem forte), confiança mais baixa
-  const confBase = temMarcadorForte ? 0.92 : 0.78;
+  const confBase = temMarcadorForte ? 0.92 : temDataOuHora ? 0.86 : 0.78;
   return {
     intent: 'tarefa',
     confidence: confBase,
-    titulo,
+    titulo: tituloFinal,
     descricao: null,
     data_token,
     hora_token,
@@ -311,7 +344,11 @@ export async function parseTarefa(texto: string): Promise<TarefaParsedIntent> {
 
   // 1. Local
   const local = tentarParseLocalTarefa(textoNorm);
-  if (local && local.confidence >= 0.85) {
+  // Threshold cobre: tarefa_ambigua (0.88), tarefa forte (0.92),
+  // tarefa data/hora sem verbo (0.86), tarefa marcador suave (0.78).
+  // Qualquer hit local >= 0.78 já é mais confiável que deixar o Groq
+  // decidir (que erra muito sem contexto).
+  if (local && local.confidence >= 0.78) {
     console.log(`[parser-tarefa] local hit (${local.intent}, conf=${local.confidence})`);
     return local;
   }
