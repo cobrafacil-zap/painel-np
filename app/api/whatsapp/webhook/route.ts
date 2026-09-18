@@ -10,6 +10,7 @@ import { mensagemAmbiguidade } from '@/modules/tarefas/lib/mensagens';
 import { evolutionEnviarTexto } from '@/lib/evolution';
 import { transcreverAudio } from '@/lib/transcricao';
 import { tokenParaData, tokenParaHora } from '@/lib/datas';
+import { normalizarAcentos } from '@/lib/acentos';
 import { formatBRL, todayISO } from '@/lib/utils';
 import type { FinanceRecord } from '@/lib/types';
 
@@ -590,7 +591,7 @@ async function safeSend(
  *  - Sem marcadores fortes → outro.
  */
 function classificarModulo(texto: string): 'financeiro' | 'tarefas' | 'outro' {
-  const t = texto.toLowerCase().trim();
+  const t = normalizarAcentos(texto.toLowerCase()).trim();
   if (!t) return 'outro';
 
   const temVerboFinanceiro =

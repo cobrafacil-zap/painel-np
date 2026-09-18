@@ -13,6 +13,7 @@
 import { generateText } from 'ai';
 import { createGroq } from '@ai-sdk/groq';
 import { numerosPorExtensoParaDigitos } from '@/lib/numeros';
+import { normalizarAcentos } from '@/lib/acentos';
 import type { TokenData, TokenHora } from '@/lib/datas';
 
 export type TarefaParsedIntent =
@@ -147,7 +148,7 @@ REGRAS CRÍTICAS
 function tentarParseLocalTarefa(texto: string): TarefaParsedIntent | null {
   const t = texto.trim();
   if (!t) return null;
-  const tl = t.toLowerCase();
+  const tl = normalizarAcentos(t.toLowerCase());
 
   // Marcadores fortes de tarefa
   const temMarcadorForte =
@@ -163,12 +164,15 @@ function tentarParseLocalTarefa(texto: string): TarefaParsedIntent | null {
   // de tarefa mas COM data/hora (ex: "Amanhã às 10h", "sexta 14h",
   // "amanhã dentista"). Sem isso, o pré-parser rejeitava essas frases e
   // elas caíam direto no Groq, que erra.
+  // IMPORTANTE: usa `tl` (já normalizado pelo normalizarAcentos) porque
+  // `\b` em V8 sem flag `/u` não casa antes/depois de letras acentuadas
+  // Latin-1 (ã, á, é, ...). Ver lib/acentos.ts.
   const temDataOuHora =
-    /\b(hoje|amanh[ãa]|semana\s+que\s+vem|m[êe]s\s+que\s+vem|fim\s+(?:do|d[eo])\s+m[êe]s|segunda|ter[çc]a|quarta|quinta|sexta|s[áa]bado|domingo|daqui\s+a\s+\d+\s+dias?|pr[óo]ximo\s+dia\s+\d+|\bdia\s+\d{1,2})\b/i.test(
-      t
+    /\b(hoje|amanha|semana\s+que\s+vem|mes\s+que\s+vem|fim\s+(?:do|de)\s+mes|segunda|terca|quarta|quinta|sexta|sabado|domingo|daqui\s+a\s+\d+\s+dias?|proximo\s+dia\s+\d+|dia\s+\d{1,2})\b/i.test(
+      tl
     ) ||
-    /\b(?:[àa]s?\s+\d{1,2}(?:h(?:\d{2})?|:\d{2})|de\s+(?:manh[ãa]|tarde|noite)|\d{1,2}h(?:\d{2})?|\d{1,2}:\d{2})\b/i.test(
-      t
+    /\b(?:as?\s+\d{1,2}(?:h(?:\d{2})?|:\d{2})|de\s+(?:manha|tarde|noite)|\d{1,2}h(?:\d{2})?|\d{1,2}:\d{2})\b/i.test(
+      tl
     );
 
   // Sem marcador forte E sem data/hora explícita → não é tarefa (deixa
