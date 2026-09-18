@@ -8,6 +8,7 @@ import { HeatmapAtividade } from './_components/heatmap-atividade';
 import { TopCategorias } from './_components/top-categorias';
 import { AtalhosRapidos } from './_components/atalhos-rapidos';
 import { InstallPWAButton } from './_components/install-pwa-button';
+import { PageHeader } from '../_components/page-header';
 
 export default async function PainelPage() {
   const supabase = await createClient();
@@ -114,26 +115,25 @@ export default async function PainelPage() {
     year: 'numeric',
   });
 
+  const saudacao = profileRes.data?.full_name
+    ? `Olá, ${profileRes.data.full_name.split(' ')[0]}.`
+    : 'Olá.';
+  const statusTarefas =
+    tarefas.length === 0
+      ? 'Nada pendente por aqui.'
+      : `${tarefas.length} tarefa${tarefas.length > 1 ? 's' : ''} pendente${
+          tarefas.length > 1 ? 's' : ''
+        }.`;
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 sm:space-y-6">
       {/* HEADER */}
-      <header className="flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <p className="label-eyebrow">Painel</p>
-          <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight capitalize text-zinc-50 mt-1">
-            {periodo}
-          </h1>
-          <p className="text-sm text-zinc-500 mt-1">
-            {profileRes.data?.full_name ? `Olá, ${profileRes.data.full_name.split(' ')[0]}.` : 'Olá.'}{' '}
-            {tarefas.length === 0
-              ? 'Nada pendente por aqui.'
-              : `${tarefas.length} tarefa${tarefas.length > 1 ? 's' : ''} pendente${
-                  tarefas.length > 1 ? 's' : ''
-                }.`}
-          </p>
-        </div>
-        <InstallPWAButton />
-      </header>
+      <PageHeader
+        eyebrow="Painel"
+        title={periodo}
+        subtitle={`${saudacao} ${statusTarefas}`}
+        action={<InstallPWAButton />}
+      />
 
       {/* HERO SALDO */}
       <HeroSaldo receitas={receitas} gastos={gastos} saldo={saldo} />

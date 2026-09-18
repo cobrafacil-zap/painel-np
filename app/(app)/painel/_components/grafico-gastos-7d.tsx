@@ -18,24 +18,24 @@ export function GraficoGastos7d({
 
   return (
     <div className="glass p-5 h-full flex flex-col">
-      <header className="flex items-start justify-between mb-3">
-        <div>
+      <header className="flex items-start justify-between gap-3 mb-3 flex-wrap">
+        <div className="min-w-0">
           <p className="label-eyebrow">Últimos 7 dias</p>
           <h2 className="text-lg font-semibold mt-1">Gastos diários</h2>
         </div>
         <div className="text-right">
-          <p className="text-2xl font-bold num-tabular text-red-300">
+          <p className="text-xl sm:text-2xl font-bold num-tabular text-red-300">
             {formatBRL(displayTotal)}
           </p>
           <p className="text-[11px] text-zinc-500 mt-0.5">acumulado</p>
         </div>
       </header>
 
-      <div className="flex-1 flex items-center">
+      <div className="flex-1 flex items-center min-h-[120px]">
         <Sparkline data={data} labels={labels} color="#ef4444" width={400} height={120} />
       </div>
 
-      <div className="flex justify-between text-[11px] text-zinc-500 mt-3 pt-3 border-t border-white/[0.04]">
+      <div className="flex justify-between text-[11px] text-zinc-500 mt-3 pt-3 border-t border-white/[0.04] gap-2 flex-wrap">
         <span>
           Pico:{' '}
           <span className="text-zinc-300 font-medium num-tabular">

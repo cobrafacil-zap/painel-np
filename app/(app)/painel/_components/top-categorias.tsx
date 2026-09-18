@@ -12,8 +12,8 @@ export function TopCategorias({
 
   return (
     <div className="glass p-5">
-      <header className="flex items-start justify-between mb-4">
-        <div>
+      <header className="flex items-start justify-between gap-3 mb-4 flex-wrap">
+        <div className="min-w-0">
           <p className="label-eyebrow">Onde o dinheiro foi</p>
           <h2 className="text-lg font-semibold mt-1">Top categorias (mês)</h2>
         </div>

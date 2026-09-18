@@ -30,49 +30,51 @@ export function HeroSaldo({
         : 'text-zinc-300';
 
   return (
-    <div className="glass-elevated p-6 sm:p-8 relative overflow-hidden">
-      {/* Glow verde no canto */}
-      <div
-        aria-hidden
-        className="absolute -top-20 -right-20 w-72 h-72 rounded-full opacity-30 blur-3xl pointer-events-none"
-        style={{
-          background:
-            'radial-gradient(circle, rgb(34 197 94 / 0.4) 0%, transparent 60%)',
-        }}
-      />
-
-      <div className="relative grid grid-cols-1 md:grid-cols-[auto_1fr] gap-6 md:gap-10 items-center">
-        {/* Ring SVG */}
+    <div className="glass-elevated p-5 sm:p-6 md:p-8 relative overflow-hidden">
+      <div className="relative grid grid-cols-1 md:grid-cols-[auto_1fr] gap-5 md:gap-10 items-center">
+        {/* Ring SVG — menor no mobile pra caber */}
         <div className="flex justify-center md:justify-start">
-          <RingProgress
-            percent={percentGastos}
-            size={200}
-            stroke={14}
-            color="#22c55e"
-            label={`${percentGastos.toFixed(0)}%`}
-            sublabel="gasto"
-          />
+          <div className="block md:hidden">
+            <RingProgress
+              percent={percentGastos}
+              size={140}
+              stroke={11}
+              color="#22c55e"
+              label={`${percentGastos.toFixed(0)}%`}
+              sublabel="gasto"
+            />
+          </div>
+          <div className="hidden md:block">
+            <RingProgress
+              percent={percentGastos}
+              size={200}
+              stroke={14}
+              color="#22c55e"
+              label={`${percentGastos.toFixed(0)}%`}
+              sublabel="gasto"
+            />
+          </div>
         </div>
 
         {/* Saldo + breakdown */}
         <div className="min-w-0">
           <p className="label-eyebrow">Saldo do mês</p>
           <p
-            className={`text-5xl sm:text-6xl font-extrabold tracking-tight num-tabular mt-2 ${saldoColor}`}
+            className={`text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-extrabold tracking-tight num-tabular mt-2 ${saldoColor}`}
           >
             {formatBRL(displaySaldo)}
           </p>
 
-          <div className="flex flex-wrap gap-x-5 gap-y-1.5 mt-4 text-sm">
+          <div className="flex flex-col sm:flex-row sm:flex-wrap gap-x-6 gap-y-1.5 mt-4 text-sm">
             <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-emerald-400" />
+              <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />
               <span className="text-zinc-400">Receitas</span>
               <span className="text-emerald-300 font-semibold num-tabular">
                 +{formatBRL(displayReceitas)}
               </span>
             </div>
             <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-red-400" />
+              <span className="w-2 h-2 rounded-full bg-red-400 shrink-0" />
               <span className="text-zinc-400">Gastos</span>
               <span className="text-red-300 font-semibold num-tabular">
                 −{formatBRL(displayGastos)}

@@ -1,10 +1,10 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 /**
  * Grid 7×N (semanas x dias da semana) com intensidade por cor.
- * Tooltip nativo no hover via `<title>`.
+ * Tooltip nativo no hover.
  *
  * @example
  *   <Heatmap data={[{ dia: '2026-09-01', valor: 50 }, ...]} />
@@ -12,7 +12,7 @@ import { useMemo, useState } from 'react';
 export function Heatmap({
   data,
   weeks = 6,
-  cellSize = 14,
+  cellSize,
   gap = 3,
   color = '#22c55e',
   labels,
@@ -26,6 +26,20 @@ export function Heatmap({
   /** Rótulos da lateral (Seg, Ter, ...). Default: ['Seg', '', 'Qua', '', 'Sex', '', 'Dom'] */
   labels?: string[];
 }) {
+  // Responsivo: celular usa células menores, desktop usa maiores.
+  const [responsiveSize, setResponsiveSize] = useState<number | null>(null);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const update = () => {
+      const w = window.innerWidth;
+      setResponsiveSize(w < 640 ? 11 : w < 1024 ? 14 : 16);
+    };
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, []);
+  cellSize = cellSize ?? responsiveSize ?? 14;
+
   const [hover, setHover] = useState<{ x: number; y: number; text: string } | null>(null);
 
   const grid = useMemo(() => {

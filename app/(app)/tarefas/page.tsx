@@ -7,6 +7,7 @@ import { TarefaForm } from './_components/tarefa-form';
 import { RingProgress } from '@/lib/svg/ring-progress';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Button } from '@/components/ui/button';
+import { PageHeader } from '../_components/page-header';
 import type { Tarefa } from '@/lib/types';
 
 type Filtro = 'pendente' | 'concluida' | 'cancelada' | 'todas';
@@ -75,30 +76,32 @@ export default function TarefasPage() {
   ).length;
 
   return (
-    <div className="space-y-6">
-      <header className="flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <p className="label-eyebrow">Módulo</p>
-          <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-zinc-50 mt-1">
-            Tarefas
-          </h1>
-          <p className="text-sm text-zinc-500 mt-1">
+    <div className="space-y-5 sm:space-y-6">
+      <PageHeader
+        eyebrow="Módulo"
+        title="Tarefas"
+        subtitle={
+          <>
             Compromissos e prazos. Manda no WhatsApp tipo{' '}
             <span className="text-zinc-400">
               &ldquo;tenho reunião sexta às 14h&rdquo;
             </span>
             .
-          </p>
-        </div>
-        <Button
-          variant="primary"
-          size="md"
-          onClick={() => setShowNew(true)}
-          className="rounded-full px-5 shadow-[0_0_24px_-6px_rgb(34,197,94,0.5)]"
-        >
-          <Plus className="w-4 h-4" /> Nova tarefa
-        </Button>
-      </header>
+          </>
+        }
+        action={
+          <Button
+            variant="primary"
+            size="md"
+            onClick={() => setShowNew(true)}
+            className="rounded-full px-4 sm:px-5 shadow-[0_0_24px_-6px_rgb(34,197,94,0.5)]"
+          >
+            <Plus className="w-4 h-4" />
+            <span className="hidden sm:inline">Nova tarefa</span>
+            <span className="sm:hidden">Nova</span>
+          </Button>
+        }
+      />
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
         <SummaryCard label="Pendentes" value={totalPendentes} color="zinc" />
@@ -224,10 +227,10 @@ function SummaryCard({
   const ringColor = color === 'red' ? '#ef4444' : color === 'amber' ? '#f59e0b' : '#22c55e';
 
   return (
-    <div className="glass p-4 flex items-center gap-4">
+    <div className="glass p-4 flex items-center gap-3 sm:gap-4">
       <RingProgress
         percent={Math.min(100, (value / total) * 100)}
-        size={56}
+        size={48}
         stroke={6}
         color={ringColor}
       />

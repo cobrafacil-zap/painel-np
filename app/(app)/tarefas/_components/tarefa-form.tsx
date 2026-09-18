@@ -52,11 +52,11 @@ export function TarefaForm({
 
   return (
     <div
-      className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
+      className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-0 sm:p-4 fade-in"
       onClick={onClose}
     >
       <div
-        className="card max-w-md w-full space-y-4"
+        className="glass-elevated w-full sm:max-w-md sm:rounded-2xl rounded-t-2xl p-5 sm:p-6 space-y-4 max-h-[92dvh] overflow-y-auto fade-up"
         onClick={(e) => e.stopPropagation()}
       >
         <h3 className="text-lg font-semibold">

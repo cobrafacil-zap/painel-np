@@ -13,13 +13,13 @@ export function HeatmapAtividade({
 
   return (
     <div className="glass p-5 h-full">
-      <header className="flex items-start justify-between mb-4">
-        <div>
+      <header className="flex items-start justify-between gap-3 mb-4 flex-wrap">
+        <div className="min-w-0">
           <p className="label-eyebrow">Atividade</p>
           <h2 className="text-lg font-semibold mt-1">Gastos — 4 semanas</h2>
         </div>
         <div className="text-right">
-          <p className="text-2xl font-bold num-tabular text-zinc-100">
+          <p className="text-xl sm:text-2xl font-bold num-tabular text-zinc-100">
             {formatBRL(total)}
           </p>
           <p className="text-[11px] text-zinc-500 mt-0.5">
@@ -29,7 +29,7 @@ export function HeatmapAtividade({
       </header>
 
       <div className="flex justify-center sm:justify-start">
-        <Heatmap data={data} weeks={6} cellSize={16} gap={4} color="#22c55e" />
+        <Heatmap data={data} weeks={6} gap={4} color="#22c55e" />
       </div>
     </div>
   );

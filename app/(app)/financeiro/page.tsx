@@ -6,6 +6,7 @@ import { ResumoCharts } from './_components/resumo-charts';
 import { ArrowRight, ListChecks, ScrollText, Tags } from 'lucide-react';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
+import { PageHeader } from '../_components/page-header';
 
 export default function FinanceiroPage() {
   const [refreshKey, setRefreshKey] = useState(0);
@@ -32,27 +33,23 @@ export default function FinanceiroPage() {
   ];
 
   return (
-    <div className="space-y-6">
-      <header className="flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <p className="label-eyebrow">Módulo</p>
-          <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-zinc-50 mt-1">
-            Financeiro
-          </h1>
-          <p className="text-sm text-zinc-500 mt-1">
-            Visão geral do mês corrente.
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <Link
-            href="/financeiro/lancamentos"
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md hover:bg-bg-elevated text-zinc-300 hover:text-zinc-100 text-sm font-medium transition-colors"
-          >
-            Ver todos <ArrowRight className="w-3.5 h-3.5" />
-          </Link>
-          <LancamentoForm onCreated={() => setRefreshKey((k) => k + 1)} />
-        </div>
-      </header>
+    <div className="space-y-5 sm:space-y-6">
+      <PageHeader
+        eyebrow="Módulo"
+        title="Financeiro"
+        subtitle="Visão geral do mês corrente."
+        action={
+          <div className="flex gap-2 flex-wrap">
+            <Link
+              href="/financeiro/lancamentos"
+              className="hidden sm:inline-flex items-center gap-1.5 px-4 py-2 rounded-md hover:bg-bg-elevated text-zinc-300 hover:text-zinc-100 text-sm font-medium transition-colors"
+            >
+              Ver todos <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
+            <LancamentoForm onCreated={() => setRefreshKey((k) => k + 1)} />
+          </div>
+        }
+      />
 
       {/* Atalhos pros sub-páginas */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">

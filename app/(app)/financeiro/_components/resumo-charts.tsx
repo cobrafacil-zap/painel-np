@@ -182,7 +182,7 @@ function CardKPI({
         </div>
         <p className="label-eyebrow">{label}</p>
       </div>
-      <p className={`text-3xl font-bold num-tabular mt-3 ${colorClass}`}>
+      <p className={`text-2xl sm:text-3xl font-bold num-tabular mt-3 break-words ${colorClass}`}>
         {formatBRL(animated)}
       </p>
     </div>

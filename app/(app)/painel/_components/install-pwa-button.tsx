@@ -101,7 +101,7 @@ export function InstallPWAButton() {
     <>
       <button
         onClick={onClick}
-        className="group inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-emerald-500/30 bg-emerald-500/[0.06] hover:bg-emerald-500/10 hover:border-emerald-500/50 text-emerald-300 text-sm transition-all"
+        className="group hidden md:inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-emerald-500/30 bg-emerald-500/[0.06] hover:bg-emerald-500/10 hover:border-emerald-500/50 text-emerald-300 text-sm transition-all"
       >
         <Smartphone className="w-4 h-4" />
         Instalar app

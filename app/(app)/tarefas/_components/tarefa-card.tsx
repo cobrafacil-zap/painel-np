@@ -87,9 +87,9 @@ export function TarefaCard({
         )}
 
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-2 flex-wrap min-w-0">
             <span className="text-base shrink-0">{t.tipo === 'compromisso' ? '📅' : '⏳'}</span>
-            <h3 className={cn('font-medium truncate', concluida && 'line-through text-zinc-500')}>
+            <h3 className={cn('font-medium truncate min-w-0', concluida && 'line-through text-zinc-500')}>
               {t.titulo}
             </h3>
             <span
