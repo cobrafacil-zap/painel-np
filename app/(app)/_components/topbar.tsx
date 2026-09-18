@@ -15,10 +15,13 @@ export function Topbar({
   right?: ReactNode;
 }) {
   return (
-    <header className="md:hidden bg-bg-base/85 backdrop-blur-xl border-b border-white/[0.06] -mx-4 sm:-mx-6 mb-4 px-4 py-3 flex items-center gap-3 max-w-full overflow-hidden">
+    <header
+      className="md:hidden sticky top-0 z-30 bg-bg-base/85 backdrop-blur-xl border-b border-white/[0.06] -mx-4 sm:-mx-6 mb-4 px-4 py-3 flex items-center gap-3 max-w-full overflow-hidden"
+      style={{ paddingTop: 'max(0.75rem, env(safe-area-inset-top))' }}
+    >
       <button
         onClick={onOpenMenu}
-        className="shrink-0 -ml-1 w-9 h-9 rounded-lg flex items-center justify-center hover:bg-white/[0.06] active:bg-white/[0.1] text-zinc-200 transition-colors"
+        className="shrink-0 -ml-1 w-11 h-11 rounded-lg flex items-center justify-center hover:bg-white/[0.06] active:bg-white/[0.1] text-zinc-200 transition-colors"
         aria-label="Abrir menu"
       >
         <Menu className="w-5 h-5" />

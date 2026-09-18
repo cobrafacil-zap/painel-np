@@ -32,7 +32,10 @@ export function AppShell({
           right={topbar?.right}
         />
 
-        <main className="flex-1 px-4 sm:px-6 md:px-8 py-4 sm:py-6 md:py-8 min-w-0 max-w-full overflow-x-hidden">
+        <main
+          className="flex-1 px-4 sm:px-6 md:px-8 py-4 sm:py-6 md:py-8 min-w-0 max-w-full overflow-x-hidden"
+          style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
+        >
           {children}
         </main>
       </div>

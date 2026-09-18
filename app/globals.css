@@ -30,6 +30,10 @@ html {
    * scrollbar e cria ~15px de overflow). */
   width: 100%;
   position: relative;
+  /* Reservar espaço pra status bar / notch / dynamic island no iOS
+   * (precisa de viewport-fit=cover no meta). */
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
 }
 
 html,
