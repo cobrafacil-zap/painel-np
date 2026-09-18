@@ -44,6 +44,12 @@ export type ParsedIntent =
       alvo: string | null;
     }
   | {
+      intent: 'orcamento_set' | 'orcamento_get' | 'orcamento_delete';
+      confidence: number;
+      categoria: string;
+      amount?: number;
+    }
+  | {
       intent: 'outro';
       confidence: number;
     };
@@ -287,6 +293,57 @@ function tentarParseLocal(texto: string): ParsedIntent | null {
     if (/top|maior|mais\s+gast/.test(tl)) {
       return { intent: 'consulta', confidence: 0.93, tipo: 'top_categoria', periodo: 'mes', categoria: null };
     }
+  }
+
+  // === ORÇAMENTO / META (#10) ===
+  // "definir meta de 600 pra mercado" / "orçamento de 800 pra lazer" /
+  // "fixar meta de 500 em transporte"
+  const orcSetMatch = tl.match(
+    /^(?:definir?|set|fixar|colocar?|criar?)\s+(?:meta|orcamento|or[çc]amento)\s+(?:de\s+)?(\d+(?:[,\.]\d+)?)\s+(?:pra|para|em|no|na|de|do|da)?\s*([a-záàãâéêíóôõúüç]+)$/i,
+  );
+  if (orcSetMatch) {
+    const valor = parseFloat(orcSetMatch[1].replace(',', '.'));
+    return {
+      intent: 'orcamento_set',
+      confidence: 0.92,
+      categoria: orcSetMatch[2].trim(),
+      amount: valor,
+    };
+  }
+  // "meta de mercado é 600" / "orçamento de lazer: 800"
+  const orcSetMatch2 = tl.match(
+    /^(?:meta|orcamento|or[çc]amento)\s+(?:de|do|da)?\s*([a-záàãâéêíóôõúüç]+)\s+(?:e|eh|é|:)\s*(\d+(?:[,\.]\d+)?)$/i,
+  );
+  if (orcSetMatch2) {
+    const valor = parseFloat(orcSetMatch2[2].replace(',', '.'));
+    return {
+      intent: 'orcamento_set',
+      confidence: 0.9,
+      categoria: orcSetMatch2[1].trim(),
+      amount: valor,
+    };
+  }
+  // "quanto falta pra meta de mercado?" / "como tá minha meta de lazer?"
+  if (/quanto\s+(?:falta|sobra|tenho)|como\s+(?:t[áa]|esta|est[áa])|status\s+(?:de\s+)?meta|minha\s+meta/i.test(tl)) {
+    const orcGetMatch = tl.match(/(?:meta|orcamento|or[çc]amento)\s+(?:de|do|da)?\s*([a-záàãâéêíóôõúüç]+)/i);
+    if (orcGetMatch) {
+      return {
+        intent: 'orcamento_get',
+        confidence: 0.88,
+        categoria: orcGetMatch[1].trim(),
+      };
+    }
+  }
+  // "remover meta de mercado" / "tirar meta de lazer"
+  const orcDelMatch = tl.match(
+    /^(?:remover?|tirar|deletar|apagar|excluir)\s+(?:meta|orcamento|or[çc]amento)\s+(?:de|do|da)?\s*([a-záàãâéêíóôõúüç]+)$/i,
+  );
+  if (orcDelMatch) {
+    return {
+      intent: 'orcamento_delete',
+      confidence: 0.9,
+      categoria: orcDelMatch[1].trim(),
+    };
   }
 
   // Pra frases muito longas (>200 chars) ou com várias cláusulas totalmente sem

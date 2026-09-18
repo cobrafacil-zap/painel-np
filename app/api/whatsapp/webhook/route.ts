@@ -4,6 +4,7 @@ import { parseMensagem } from '@/modules/financeiro/lib/parser-mensagem';
 import { responderConsulta } from '@/modules/financeiro/lib/consultas';
 import { executarAcao } from '@/modules/financeiro/lib/acoes';
 import { criarCompromisso, resumoCompromissos, listarParcelas, marcarParcelaPaga } from '@/modules/financeiro/lib/compromissos';
+import { setOrcamento, getOrcamento, deleteOrcamento } from '@/modules/financeiro/lib/orcamentos';
 import { parseTarefa } from '@/modules/tarefas/lib/parser-mensagem';
 import { criarTarefa, concluirTarefaPorTexto, concluirPorReaction } from '@/modules/tarefas/lib/acoes';
 import { mensagemAmbiguidade } from '@/modules/tarefas/lib/mensagens';
@@ -784,6 +785,28 @@ export async function POST(req: NextRequest) {
       deleted: result.deleted ?? 0,
       pendingConfirm: result.pendingConfirm,
     });
+  }
+
+  // === ORÇAMENTO / META (#10) ===
+  if (
+    parsed.intent === 'orcamento_set' ||
+    parsed.intent === 'orcamento_get' ||
+    parsed.intent === 'orcamento_delete'
+  ) {
+    const o = parsed as Extract<
+      typeof parsed,
+      { intent: 'orcamento_set' | 'orcamento_get' | 'orcamento_delete' }
+    >;
+    let result: { reply: string; ok: boolean };
+    if (o.intent === 'orcamento_set') {
+      result = await setOrcamento(userId, o.categoria, o.amount ?? 0);
+    } else if (o.intent === 'orcamento_get') {
+      result = await getOrcamento(userId, o.categoria);
+    } else {
+      result = await deleteOrcamento(userId, o.categoria);
+    }
+    await safeSend(remoteJid, result.reply, instanceFromPayload);
+    return NextResponse.json({ ok: true, intent: o.intent });
   }
 
   return NextResponse.json({ ok: true, skipped: true });

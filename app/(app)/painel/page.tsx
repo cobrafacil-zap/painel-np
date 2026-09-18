@@ -8,6 +8,7 @@ import { HeatmapAtividade } from './_components/heatmap-atividade';
 import { TopCategorias } from './_components/top-categorias';
 import { ContasMoradia } from './_components/contas-moradia';
 import { PadroesPrevistos } from './_components/padroes-previstos';
+import { MetasMes } from './_components/metas-mes';
 import { AtalhosRapidos } from './_components/atalhos-rapidos';
 import { InstallPWAButton } from './_components/install-pwa-button';
 import { PageHeader } from '../_components/page-header';
@@ -167,7 +168,10 @@ export default async function PainelPage() {
         <ContasMoradia refreshKey={0} />
       </div>
 
-      <PadroesPrevistos />
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-5">
+        <PadroesPrevistos />
+        <MetasMes />
+      </div>
     </div>
   );
 }
