@@ -12,6 +12,7 @@ import { transcreverAudio } from '@/lib/transcricao';
 import { tokenParaData, tokenParaHora } from '@/lib/datas';
 import { normalizarAcentos } from '@/lib/acentos';
 import { formatBRL, todayISO } from '@/lib/utils';
+import { getSession, setContext, clearContext } from '@/lib/whatsapp/session';
 import type { FinanceRecord } from '@/lib/types';
 
 // Fluid Compute: roda em São Paulo (gru1), perto do Contabo.
@@ -290,7 +291,7 @@ export async function POST(req: NextRequest) {
   const modulo = classificarModulo(texto);
   console.log(`[webhook] classificarModulo=${modulo}`);
 
-  let parsed;
+  let parsed: import('@/modules/financeiro/lib/parser-mensagem').ParsedIntent | import('@/modules/tarefas/lib/parser-mensagem').TarefaParsedIntent;
   try {
     if (modulo === 'tarefas') {
       parsed = await Promise.race([
@@ -385,6 +386,31 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, intent: 'tarefa_ambigua', motivo: t.motivo });
   }
 
+  // === FOLLOW-UP com contexto (#2) ===
+  // Se a mensagem caiu em 'outro' (frase curta sem verbo claro), checa se
+  // existe uma consulta recente na sessão. Se sim, injeta como contexto pro
+  // Groq re-interpretar a frase como refinamento ("e mês passado?",
+  // "que dia foi?", "e dividido por categoria?").
+  if ((parsed.intent === 'outro' || parsed.confidence < 0.6) && instanceFromPayload) {
+    const sess = await getSession(userId, remoteJid, instanceFromPayload);
+    if (sess.lastQuery && texto.trim().length <= 60) {
+      const enriched = `Contexto da última pergunta do usuário: ele acabou de perguntar "${sess.lastQuery.tipo}" no período "${sess.lastQuery.periodo}"${sess.lastQuery.categoriaLabel ? ` filtrando por "${sess.lastQuery.categoriaLabel}"` : ''}. A mensagem de agora dele é: "${texto}".\n\nSe a mensagem nova for um refinamento da última pergunta (mudar período, dividir por categoria, etc), retorne intent="consulta" reaproveitando os campos relevantes. Caso contrário, retorne intent="outro".`;
+      const reParsed = await parseMensagem(enriched);
+      if (reParsed.intent !== 'outro' && reParsed.confidence >= 0.6) {
+        parsed = reParsed;
+        // Re-roteia pelo handler de consulta
+        if (parsed.intent === 'consulta') {
+          const result = await responderConsulta(userId, parsed as Extract<typeof parsed, { intent: 'consulta' }>, {
+            remoteJid,
+            instanceName: instanceFromPayload,
+          });
+          await safeSend(remoteJid, result.reply, instanceFromPayload);
+          return NextResponse.json({ ok: true, intent: 'consulta', followup: true });
+        }
+      }
+    }
+  }
+
   if (parsed.intent === 'outro' || parsed.confidence < 0.6) {
     await safeSend(
       remoteJid,
@@ -443,7 +469,10 @@ export async function POST(req: NextRequest) {
   }
 
   if (parsed.intent === 'consulta') {
-    const result = await responderConsulta(userId, parsed);
+    const result = await responderConsulta(userId, parsed, {
+      remoteJid,
+      instanceName: instanceFromPayload ?? '',
+    });
     await safeSend(remoteJid, result.reply, instanceFromPayload);
     return NextResponse.json({ ok: true, intent: 'consulta' });
   }

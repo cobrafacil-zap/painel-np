@@ -2,6 +2,25 @@ import { createServiceClient } from '@/lib/supabase/server';
 import { formatBRL, startOfMonthISO, endOfMonthISO } from '@/lib/utils';
 import type { ParsedIntent } from './parser-mensagem';
 import { resumoCompromissos, listarParcelas } from './compromissos';
+import { setContext } from '@/lib/whatsapp/session';
+
+const CATEGORIA_LABEL: Record<string, string> = {
+  mercado: 'mercado',
+  transporte: 'transporte',
+  alimentacao: 'alimentação',
+  moradia: 'moradia',
+  contas_casa: 'contas de casa',
+  assinaturas: 'assinaturas',
+  saude: 'saúde',
+  lazer: 'lazer',
+  educacao: 'educação',
+  posto: 'posto',
+  cartao_credito: 'cartão de crédito',
+  freelance: 'freelance',
+  salario: 'salário',
+  investimentos: 'investimentos',
+  outros: 'outros',
+};
 
 type Periodo = 'hoje' | 'semana' | 'mes' | 'mes_passado' | 'tudo';
 
@@ -31,9 +50,27 @@ function isoDateRange(periodo: Periodo): { from: string; to: string; label: stri
   }
 }
 
-export async function responderConsulta(userId: string, intent: Extract<ParsedIntent, { intent: 'consulta' }>): Promise<ConsultResult> {
+export async function responderConsulta(
+  userId: string,
+  intent: Extract<ParsedIntent, { intent: 'consulta' }>,
+  ctx?: { remoteJid?: string; instanceName?: string }
+): Promise<ConsultResult> {
   const supabase = createServiceClient();
   const { from, to, label } = isoDateRange(intent.periodo);
+
+  // Salva contexto da query pra follow-up "e mês passado?"
+  // (roda em paralelo com a query, não bloqueia response)
+  if (ctx?.remoteJid && ctx?.instanceName) {
+    void setContext(userId, ctx.remoteJid, ctx.instanceName, {
+      lastQuery: {
+        tipo: intent.tipo,
+        periodo: intent.periodo,
+        categoria: intent.categoria ?? null,
+        categoriaLabel: intent.categoria ? (CATEGORIA_LABEL[intent.categoria] ?? intent.categoria) : null,
+        ts: new Date().toISOString(),
+      },
+    });
+  }
 
   if (intent.tipo === 'saldo' || intent.tipo === 'gastos' || intent.tipo === 'receitas') {
     let q = supabase
