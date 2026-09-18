@@ -231,6 +231,22 @@ export async function jobCalcularPadroes(): Promise<{ users: number; patterns: n
 
     if (!error) totalPatterns += rows.length;
     else console.warn('[calcularPadroes] upsert error:', error.message);
+
+    // #4: agenda lembretes proativos pra contas previstas nos próximos 7 dias
+    const { agendarLembretesPrevisao } = await import('./lembretes-previsao');
+    await agendarLembretesPrevisao(
+      userId,
+      patterns
+        .filter((p) => p.next_expected_date !== null)
+        .map((p) => ({
+          pattern_key: p.pattern_key,
+          next_expected_date: p.next_expected_date as string,
+          next_expected_amount: p.next_expected_amount,
+          avg_amount: p.avg_amount,
+          day_of_month: p.day_of_month,
+          sample_count: p.sample_count,
+        })),
+    );
   }
 
   return { users: userIds.length, patterns: totalPatterns };
