@@ -25,6 +25,8 @@ export interface SessionContext {
   };
   // ID da última msg que o bot mandou pra esse JID (pra reaction ✅)
   lastBotMessageId?: string;
+  // ID da última tarefa criada pelo bot (#5 — reaction contextual)
+  lastCreatedTarefaId?: string;
   // Última pergunta pendente esperando confirmação
   // (dedup: "isso parece duplicata, confirma?" | undo: "apaguei X, responde 'desfazer'")
   pendingPrompt?: {
@@ -35,8 +37,11 @@ export interface SessionContext {
     ts: string;
   };
   // Snapshot do último record deletado (pra "desfazer")
+  // - apagar_ultimo → record único
+  // - apagar_categoria → snapshots[] em batch
   lastDeletedRecord?: {
-    record: Record<string, unknown>;
+    record?: Record<string, unknown> | null;
+    snapshots?: Array<Record<string, unknown>>;
     ts: string;
   };
   // Permite extensão por outras features
@@ -118,5 +123,6 @@ export async function clearContext(
     pendingPrompt: undefined,
     lastDeletedRecord: undefined,
     lastBotMessageId: undefined,
+    lastCreatedTarefaId: undefined,
   } as Partial<SessionContext>);
 }

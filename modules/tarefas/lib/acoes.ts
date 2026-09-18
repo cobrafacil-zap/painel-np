@@ -179,11 +179,19 @@ export async function concluirTarefaPorTexto(
 /**
  * Handler de reação ✅ no WhatsApp. Recebe o id da msg que recebeu a
  * reação e marca a tarefa correspondente como concluída.
+ *
+ * #5: além do match direto por confirm_message_id, tenta casar via
+ * lastBotMessageId da sessão do user — permite que o bot confirme
+ * mensagens sem ter esperado o id da Evolution (ex: mensagens com
+ * dedup confirm, msgs de consulta, msgs de ação).
  */
 export async function concluirPorReaction(
-  reactedMessageId: string
+  reactedMessageId: string,
+  ctx?: { userId?: string; remoteJid?: string; instanceName?: string }
 ): Promise<Result> {
   const supabase = createServiceClient();
+
+  // 1) Match direto no confirm_message_id (caminho canônico)
   const { data: t } = await supabase
     .from('tarefas')
     .select('id, user_id, titulo')
@@ -191,8 +199,20 @@ export async function concluirPorReaction(
     .eq('status', 'pendente')
     .maybeSingle();
 
-  if (!t) return { reply: '', ok: false }; // reação não casa com nenhuma tarefa
-  return await concluirTarefa(t.user_id, t.id);
+  if (t) return await concluirTarefa(t.user_id, t.id);
+
+  // 2) Match via sessão: se a msg reativa é a última msg do bot na
+  // sessão do user e essa sessão referenciava uma tarefa (ex: criada
+  // minutos atrás pelo mesmo user), conclui ela.
+  if (ctx?.userId && ctx?.remoteJid && ctx?.instanceName) {
+    const { getSession } = await import('@/lib/whatsapp/session');
+    const sess = await getSession(ctx.userId, ctx.remoteJid, ctx.instanceName);
+    if (sess.lastBotMessageId === reactedMessageId && sess.lastCreatedTarefaId) {
+      return await concluirTarefa(ctx.userId, sess.lastCreatedTarefaId);
+    }
+  }
+
+  return { reply: '', ok: false };
 }
 
 /**

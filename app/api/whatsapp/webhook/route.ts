@@ -254,7 +254,11 @@ export async function POST(req: NextRequest) {
     const emoji = reaction.text;
     const reactedToId = reaction.key?.id;
     if (emoji === '✅' && reactedToId) {
-      const result = await concluirPorReaction(reactedToId);
+      const result = await concluirPorReaction(reactedToId, {
+        userId,
+        remoteJid,
+        instanceName: instanceFromPayload,
+      });
       if (result.ok && result.reply) {
         await safeSend(remoteJid, result.reply, instanceFromPayload);
         return NextResponse.json({ ok: true, intent: 'reacao_concluir' });
@@ -286,11 +290,12 @@ export async function POST(req: NextRequest) {
   // executa a ação guardada.
   if (instanceFromPayload && texto.trim().length <= 20) {
     const sess = await getSession(userId, remoteJid, instanceFromPayload);
-    if (sess.pendingPrompt && sess.pendingPrompt.kind === 'dedup_confirm') {
-      const resp = texto.trim().toLowerCase();
-      if (/^(sim|s|yes|y|confirma|confirma|confere|pode\s+registrar|registra|e)$/i.test(resp)) {
-        // Usuário confirmou: insere o registro guardado
-        const payload = sess.pendingPrompt.payload as any;
+    const pk = sess.pendingPrompt?.kind;
+    const resp = texto.trim().toLowerCase();
+
+    if (pk === 'dedup_confirm') {
+      if (/^(sim|s|yes|y|confirma|confere|pode\s+registrar|registra|e)$/i.test(resp)) {
+        const payload = sess.pendingPrompt!.payload as any;
         const { error } = await supabase.from('records').insert({
           user_id: userId,
           module_id: 'financeiro',
@@ -304,9 +309,7 @@ export async function POST(req: NextRequest) {
           source_message_id: messageId,
           metadata: { remote_jid: remoteJid, dedup_confirmed: true },
         });
-        await setContext(userId, remoteJid, instanceFromPayload, {
-          pendingPrompt: undefined,
-        } as any);
+        await setContext(userId, remoteJid, instanceFromPayload, { pendingPrompt: undefined } as any);
         if (error) {
           await safeSend(remoteJid, `⚠️ Erro ao salvar: ${error.message}`, instanceFromPayload);
         } else {
@@ -315,12 +318,98 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ ok: true, intent: 'dedup_confirmed' });
       }
       if (/^(n[ãa]o|nao|n|no|cancela|cancelar|ignora|esquece)$/i.test(resp)) {
-        await setContext(userId, remoteJid, instanceFromPayload, {
-          pendingPrompt: undefined,
-        } as any);
+        await setContext(userId, remoteJid, instanceFromPayload, { pendingPrompt: undefined } as any);
         await safeSend(remoteJid, `👍 Beleza, não registrei.`, instanceFromPayload);
         return NextResponse.json({ ok: true, intent: 'dedup_cancelled' });
       }
+    }
+
+    if (pk === 'delete_confirm') {
+      const payload = sess.pendingPrompt!.payload as {
+        acao: 'apagar_categoria';
+        alvo: string;
+        count: number;
+        totalAmount: number;
+      };
+      if (/^(sim|s|yes|y|confirma|confere|pode|apaga)$/i.test(resp)) {
+        // Apaga e gera snapshots pra undo
+        const { data: toDelete } = await supabase
+          .from('records')
+          .select('id, type, amount, category, description, occurred_at, payment_method, module_id, source')
+          .eq('user_id', userId)
+          .eq('module_id', 'financeiro')
+          .eq('category', payload.alvo);
+        const { error } = await supabase
+          .from('records')
+          .delete()
+          .eq('user_id', userId)
+          .eq('module_id', 'financeiro')
+          .eq('category', payload.alvo);
+        if (error) {
+          await safeSend(remoteJid, `⚠️ Erro ao apagar: ${error.message}`, instanceFromPayload);
+          return NextResponse.json({ ok: true, intent: 'acao', error: 'db' });
+        }
+        const snapshots = (toDelete ?? []).map(({ id: _id, ...rest }) => rest);
+        await setContext(userId, remoteJid, instanceFromPayload, {
+          pendingPrompt: undefined,
+          lastDeletedRecord: {
+            record: snapshots[0] ?? null,
+            snapshots,
+            ts: new Date().toISOString(),
+          },
+        } as any);
+        await safeSend(
+          remoteJid,
+          `🗑️ ${payload.count} lançamentos de "${payload.alvo}" apagados.\nSe arrependeu, responde "desfazer" em 30min.`,
+          instanceFromPayload,
+        );
+        return NextResponse.json({ ok: true, intent: 'acao', deleted: payload.count });
+      }
+      if (/^(n[ãa]o|nao|n|no|cancela|cancelar|esquece)$/i.test(resp)) {
+        await setContext(userId, remoteJid, instanceFromPayload, { pendingPrompt: undefined } as any);
+        await safeSend(remoteJid, `👍 Beleza, não apaguei nada.`, instanceFromPayload);
+        return NextResponse.json({ ok: true, intent: 'acao', cancelled: true });
+      }
+    }
+  }
+
+  // === DESFAZER delete (#5) ===
+  // Usuário pode responder "desfazer" / "volta" / "restaura" logo após
+  // apagar 1 ou vários registros. O snapshot fica em `lastDeletedRecord`
+  // por 30min (TTL da sessão).
+  if (instanceFromPayload && /^desfazer|volta|restaura|undo|desfiz|cancelar/i.test(texto.trim())) {
+    const sess = await getSession(userId, remoteJid, instanceFromPayload);
+    const ld = sess.lastDeletedRecord;
+    if (ld) {
+      const snapshots = (ld as any).snapshots ?? ((ld as any).record ? [(ld as any).record] : []);
+      if (snapshots.length === 0) {
+        await safeSend(remoteJid, `🤷 Não tenho nada pra restaurar.`, instanceFromPayload);
+        return NextResponse.json({ ok: true, intent: 'undo_nothing' });
+      }
+      const rows = snapshots.map((s: any) => ({
+        user_id: userId,
+        module_id: s.module_id ?? 'financeiro',
+        type: s.type,
+        amount: s.amount,
+        category: s.category,
+        description: s.description,
+        payment_method: s.payment_method,
+        occurred_at: s.occurred_at ?? todayISO(),
+        source: s.source ?? 'whatsapp',
+        metadata: { restored_from_undo: true, original_deleted_at: ld.ts },
+      }));
+      const { error } = await supabase.from('records').insert(rows);
+      await setContext(userId, remoteJid, instanceFromPayload, { lastDeletedRecord: undefined } as any);
+      if (error) {
+        await safeSend(remoteJid, `⚠️ Erro ao restaurar: ${error.message}`, instanceFromPayload);
+      } else {
+        await safeSend(
+          remoteJid,
+          `↩️ Pronto, restaurei ${rows.length} registro${rows.length > 1 ? 's' : ''}.`,
+          instanceFromPayload,
+        );
+      }
+      return NextResponse.json({ ok: true, intent: 'undo_done', restored: rows.length });
     }
   }
 
@@ -418,6 +507,13 @@ export async function POST(req: NextRequest) {
           .eq('user_id', userId);
       } catch (e) {
         console.warn('[webhook] não gravou confirm_message_id:', e);
+      }
+      // #5: também grava na sessão pra conclusão por reação contextual
+      if (instanceFromPayload) {
+        void setContext(userId, remoteJid, instanceFromPayload, {
+          lastBotMessageId: sent.id,
+          lastCreatedTarefaId: result.id,
+        });
       }
     }
 
@@ -669,9 +765,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, intent: 'acao' });
     }
 
-    const result = await executarAcao(userId, a.acao, a.alvo);
+    const result = await executarAcao(userId, a.acao, a.alvo, {
+      remoteJid,
+      instanceName: instanceFromPayload,
+    });
     await safeSend(remoteJid, result.reply, instanceFromPayload);
-    return NextResponse.json({ ok: true, intent: 'acao', deleted: result.deleted ?? 0 });
+    return NextResponse.json({
+      ok: true,
+      intent: 'acao',
+      deleted: result.deleted ?? 0,
+      pendingConfirm: result.pendingConfirm,
+    });
   }
 
   return NextResponse.json({ ok: true, skipped: true });
