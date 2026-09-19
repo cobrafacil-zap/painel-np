@@ -1,11 +1,22 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { createClient } from '@/lib/supabase/client';
 import type { FinanceRecord } from '@/lib/types';
 import { LancamentoForm } from '../_components/lancamento-form';
 import { formatBRL, formatDateBR } from '@/lib/utils';
 import { Trash2, Pencil } from 'lucide-react';
+
+// Lazy-load: drawer só baixa quando o usuário abre pra editar.
+// Evita inflar o bundle da list page com forms.
+const EditLancamentoDrawer = dynamic(
+  () =>
+    import('../_components/edit-lancamento-drawer').then((m) => ({
+      default: m.EditLancamentoDrawer,
+    })),
+  { ssr: false },
+);
 
 export default function LancamentosPage() {
   const [records, setRecords] = useState<FinanceRecord[]>([]);
@@ -98,7 +109,7 @@ export default function LancamentosPage() {
                     <div className="flex gap-0.5">
                       <button
                         onClick={() => setEditing(r)}
-                        className="p-1.5 rounded hover:bg-bg-elevated text-zinc-500 hover:text-zinc-200 transition-colors"
+                        className="p-2 sm:p-1.5 rounded hover:bg-bg-elevated text-zinc-500 hover:text-zinc-200 transition-colors"
                         title="Editar lançamento"
                         aria-label="Editar lançamento"
                       >
@@ -106,7 +117,7 @@ export default function LancamentosPage() {
                       </button>
                       <button
                         onClick={() => setPendingDelete(r)}
-                        className="p-1.5 rounded hover:bg-red-500/10 text-zinc-500 hover:text-red-300 transition-colors"
+                        className="p-2 sm:p-1.5 rounded hover:bg-red-500/10 text-zinc-500 hover:text-red-300 transition-colors"
                         title="Apagar lançamento"
                         aria-label="Apagar lançamento"
                       >
@@ -127,13 +138,16 @@ export default function LancamentosPage() {
         )}
       </div>
 
-      {/* Modal de confirmação de exclusão */}
+      {/* Confirmação de exclusão — bottom-sheet no mobile, centralizado no desktop */}
       {pendingDelete && (
         <div
-          className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
+          className="fixed inset-0 bg-black/60 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4"
           onClick={() => !deleting && setPendingDelete(null)}
         >
-          <div className="card max-w-sm w-full space-y-4" onClick={(e) => e.stopPropagation()}>
+          <div
+            className="bg-bg-elevated rounded-t-2xl sm:rounded-2xl w-full sm:max-w-sm p-5 sm:p-6 space-y-4 pb-[calc(env(safe-area-inset-bottom)+1rem)]"
+            onClick={(e) => e.stopPropagation()}
+          >
             <h3 className="text-lg font-semibold">Apagar lançamento?</h3>
             <div className="text-sm text-zinc-400 space-y-1">
               <p>
@@ -149,7 +163,7 @@ export default function LancamentosPage() {
               <button
                 onClick={() => setPendingDelete(null)}
                 disabled={deleting}
-                className="px-4 py-2 rounded-lg text-sm hover:bg-bg-elevated disabled:opacity-50"
+                className="px-4 py-2 rounded-lg text-sm hover:bg-bg-base disabled:opacity-50"
               >
                 Cancelar
               </button>
@@ -165,180 +179,16 @@ export default function LancamentosPage() {
         </div>
       )}
 
-      {/* Modal de edição */}
-      {editing && (
-        <EditLancamentoModal
-          record={editing}
-          onClose={() => setEditing(null)}
-          onSaved={() => {
-            setEditing(null);
-            flash('✅ Lançamento atualizado.');
-            setRefreshKey((k) => k + 1);
-          }}
-        />
-      )}
-    </div>
-  );
-}
-
-function EditLancamentoModal({
-  record,
-  onClose,
-  onSaved,
-}: {
-  record: FinanceRecord;
-  onClose: () => void;
-  onSaved: () => void;
-}) {
-  const [type, setType] = useState<'gasto' | 'receita'>(
-    record.type === 'neutro' ? 'gasto' : record.type
-  );
-  const [amount, setAmount] = useState(String(record.amount));
-  const [description, setDescription] = useState(record.description ?? '');
-  const [category, setCategory] = useState(record.category ?? '');
-  const [paymentMethod, setPaymentMethod] = useState(record.payment_method ?? '');
-  const [occurredAt, setOccurredAt] = useState(record.occurred_at);
-  const [categories, setCategories] = useState<{ slug: string; label: string }[]>([]);
-  const [saving, setSaving] = useState(false);
-  const [erro, setErro] = useState<string | null>(null);
-
-  useEffect(() => {
-    fetch('/api/financeiro/categorias')
-      .then((r) => r.json())
-      .then(({ categories }) => setCategories(categories ?? []));
-  }, []);
-
-  async function save() {
-    setErro(null);
-    const v = parseFloat(amount.replace(',', '.'));
-    if (!v || v <= 0) {
-      setErro('Valor inválido.');
-      return;
-    }
-    setSaving(true);
-    const res = await fetch(`/api/financeiro/lancamentos/${record.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        type,
-        amount: v,
-        description: description.trim() || null,
-        category: category || null,
-        payment_method: paymentMethod || null,
-        occurred_at: occurredAt,
-      }),
-    });
-    setSaving(false);
-    if (res.ok) onSaved();
-    else {
-      const j = await res.json().catch(() => ({}));
-      setErro(j.error ?? 'Erro ao salvar');
-    }
-  }
-
-  return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div className="card max-w-md w-full space-y-4" onClick={(e) => e.stopPropagation()}>
-        <h3 className="text-lg font-semibold">Editar lançamento</h3>
-
-        <div className="flex gap-2">
-          <button
-            onClick={() => setType('gasto')}
-            className={`flex-1 py-2 rounded-lg text-sm ${
-              type === 'gasto' ? 'bg-red-500/20 text-red-300' : 'bg-bg-elevated text-zinc-400'
-            }`}
-          >
-            💸 Gasto
-          </button>
-          <button
-            onClick={() => setType('receita')}
-            className={`flex-1 py-2 rounded-lg text-sm ${
-              type === 'receita' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-bg-elevated text-zinc-400'
-            }`}
-          >
-            💰 Receita
-          </button>
-        </div>
-
-        <div>
-          <label className="block text-xs text-zinc-400 mb-1">Valor (R$)</label>
-          <input
-            type="number"
-            step="0.01"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            className="w-full bg-bg-elevated border border-border rounded px-3 py-2 text-sm tabular-nums"
-            autoFocus
-          />
-        </div>
-
-        <div>
-          <label className="block text-xs text-zinc-400 mb-1">Descrição</label>
-          <input
-            type="text"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="Ex: Almoço no iFood"
-            className="w-full bg-bg-elevated border border-border rounded px-3 py-2 text-sm"
-          />
-        </div>
-
-        <div>
-          <label className="block text-xs text-zinc-400 mb-1">Categoria</label>
-          <select
-            value={category}
-            onChange={(e) => setCategory(e.target.value)}
-            className="w-full bg-bg-elevated border border-border rounded px-3 py-2 text-sm"
-          >
-            <option value="">— sem categoria —</option>
-            {categories.map((c) => (
-              <option key={c.slug} value={c.slug}>{c.label}</option>
-            ))}
-          </select>
-        </div>
-
-        <div>
-          <label className="block text-xs text-zinc-400 mb-1">Forma de pagamento</label>
-          <select
-            value={paymentMethod}
-            onChange={(e) => setPaymentMethod(e.target.value)}
-            className="w-full bg-bg-elevated border border-border rounded px-3 py-2 text-sm"
-          >
-            <option value="">— não informado —</option>
-            <option value="pix">PIX</option>
-            <option value="cartao_credito">Cartão de crédito</option>
-            <option value="cartao_debito">Cartão de débito</option>
-            <option value="dinheiro">Dinheiro</option>
-            <option value="boleto">Boleto</option>
-            <option value="transferencia">Transferência</option>
-          </select>
-        </div>
-
-        <div>
-          <label className="block text-xs text-zinc-400 mb-1">Data</label>
-          <input
-            type="date"
-            value={occurredAt}
-            onChange={(e) => setOccurredAt(e.target.value)}
-            className="w-full bg-bg-elevated border border-border rounded px-3 py-2 text-sm"
-          />
-        </div>
-
-        {erro && <p className="text-xs text-red-300">⚠️ {erro}</p>}
-
-        <div className="flex gap-2 justify-end pt-2">
-          <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm hover:bg-bg-elevated">
-            Cancelar
-          </button>
-          <button
-            onClick={save}
-            disabled={saving}
-            className="px-4 py-2 rounded-lg text-sm bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 disabled:opacity-50"
-          >
-            {saving ? 'Salvando…' : 'Salvar'}
-          </button>
-        </div>
-      </div>
+      {/* Drawer de edição — mobile-first (bottom-sheet) */}
+      <EditLancamentoDrawer
+        record={editing}
+        onClose={() => setEditing(null)}
+        onSaved={() => {
+          setEditing(null);
+          flash('✅ Lançamento atualizado.');
+          setRefreshKey((k) => k + 1);
+        }}
+      />
     </div>
   );
 }
