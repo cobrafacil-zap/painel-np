@@ -187,6 +187,21 @@ EXEMPLOS DE AÇÃO
 "oi" → {"intent":"outro","confidence":0.98}
 
 ═══════════════════════════════════════════════
+EXEMPLOS DE META DIÁRIA
+═══════════════════════════════════════════════
+
+"Meta de 60 reais gastos diariamente" → {"intent":"meta_diaria_set","confidence":0.92,"amount":60}
+"definir meta diária de 100" → {"intent":"meta_diaria_set","confidence":0.94,"amount":100}
+"limite diário 150" → {"intent":"meta_diaria_set","confidence":0.93,"amount":150}
+"teto diário 200" → {"intent":"meta_diaria_set","confidence":0.92,"amount":200}
+"gasto máximo de 100 por dia" → {"intent":"meta_diaria_set","confidence":0.91,"amount":100}
+"posso gastar 80 por dia" → {"intent":"meta_diaria_set","confidence":0.88,"amount":80}
+"qual minha meta diária?" → {"intent":"meta_diaria_get","confidence":0.92}
+"como tá minha meta diária" → {"intent":"meta_diaria_get","confidence":0.91}
+"remover meta diária" → {"intent":"meta_diaria_delete","confidence":0.93}
+"tirar limite diário" → {"intent":"meta_diaria_delete","confidence":0.92}
+
+═══════════════════════════════════════════════
 REGRAS CRÍTICAS (NUNCA ESQUEÇA)
 ═══════════════════════════════════════════════
 
@@ -214,6 +229,7 @@ LEMBRE-SE: você DEVE devolver um JSON válido E SOMENTE JSON. Sem "Aqui está o
 // o conteúdo vive em `@/lib/numeros`.
 import { numerosPorExtensoParaDigitos } from '@/lib/numeros';
 import { carregarPadroesParaContexto } from '@/lib/financeiro/patterns';
+import { logStage, logError } from '@/lib/log';
 
 /**
  * Converte números por extenso (PT-BR) pra dígitos. Implementação vive
@@ -354,6 +370,56 @@ function tentarParseLocal(texto: string): ParsedIntent | null {
       intent: 'meta_diaria_delete',
       confidence: 0.93,
     };
+  }
+
+  // === META DIÁRIA — variações com ordem variável (#overhaul)
+  // Aceita tanto o marcador temporal ("diariamente|por dia|dia") ANTES
+  // do número quanto DEPOIS. Cobre frases naturais tipo:
+  //   "meta de 60 reais gastos diariamente"
+  //   "60 reais gastos por dia como meta"
+  //   "teto diário 150"
+  //   "limite de 100 por dia"
+  //   "posso gastar 100 por dia"
+  //   "configurar meta diária 100"
+  //   "gasto máximo de 100 por dia"
+  const metaFlex = tl.match(
+    /(?:meta|limite|teto|m[áa]ximo)\s+(?:de\s+|[:eé]\s+)?(\d+(?:[,\.]\d+)?)\s*(?:reais?)?\s*(?:de\s+)?(?:gastos?\s+)?(?:di[áa]ri[ao]|diariamente|por\s+dia|de\s+dia)/i
+  );
+  if (metaFlex) {
+    const valor = parseFloat(metaFlex[1].replace(',', '.'));
+    if (valor > 0) {
+      return { intent: 'meta_diaria_set', confidence: 0.9, amount: valor };
+    }
+  }
+  // "teto diário 150" / "limite diário 150" / "máximo diário 150" — número vem DEPOIS
+  const metaTeto = tl.match(
+    /^(?:teto|limite|m[áa]ximo)\s+(?:de\s+)?(?:gastos?\s+)?(?:di[áa]ri[ao]|por\s+dia|de\s+dia)\s+(?:de\s+)?(\d+(?:[,\.]\d+)?)\s*(?:reais?)?$/i,
+  );
+  if (metaTeto) {
+    const valor = parseFloat(metaTeto[1].replace(',', '.'));
+    if (valor > 0) {
+      return { intent: 'meta_diaria_set', confidence: 0.92, amount: valor };
+    }
+  }
+  // "configurar meta diária 100" / "definir limite do dia 100"
+  const metaConfig = tl.match(
+    /^(?:configurar?|definir?|set|fixar)\s+(?:meta|limite|teto)\s+(?:de\s+)?(?:gastos?\s+)?(?:di[áa]ri[ao]|por\s+dia|de\s+dia)\s+(?:de\s+)?(\d+(?:[,\.]\d+)?)\s*(?:reais?)?$/i,
+  );
+  if (metaConfig) {
+    const valor = parseFloat(metaConfig[1].replace(',', '.'));
+    if (valor > 0) {
+      return { intent: 'meta_diaria_set', confidence: 0.91, amount: valor };
+    }
+  }
+  // "posso gastar 100 por dia" / "quero gastar no máximo 100 por dia"
+  const metaPosso = tl.match(
+    /^(?:posso|quero|devo|penso)\s+gastar(?:\s+no\s+m[áa]ximo)?\s+(\d+(?:[,\.]\d+)?)\s*(?:reais?)?\s+por\s+dia$/i,
+  );
+  if (metaPosso) {
+    const valor = parseFloat(metaPosso[1].replace(',', '.'));
+    if (valor > 0) {
+      return { intent: 'meta_diaria_set', confidence: 0.88, amount: valor };
+    }
   }
 
   // === ORÇAMENTO / META (#10) ===
@@ -652,7 +718,10 @@ export async function parseMensagem(texto: string, opts?: { userId?: string }): 
   // 1. Tenta parser local (caminho rápido)
   const local = tentarParseLocal(textoNormalizado);
   if (local && local.confidence >= 0.85) {
-    console.log(`[parser] local hit (${local.intent}, conf=${local.confidence})`);
+    logStage('parser_local_hit', undefined, {
+      intent: local.intent,
+      confidence: local.confidence,
+    });
     return local;
   }
 
@@ -670,13 +739,31 @@ export async function parseMensagem(texto: string, opts?: { userId?: string }): 
 
   // 2. Cai pro Groq
   const groq = getGroq();
-  const { text } = await generateText({
-    model: groq('llama-3.1-8b-instant'), // mais rápido e determinístico que gpt-oss-120b
-    system: systemPrompt,
-    prompt: textoNormalizado,
-    temperature: 0.05,
-    maxTokens: 600,
-  });
+  const t0 = Date.now();
+  let text: string;
+  try {
+    const result = await generateText({
+      model: groq('llama-3.1-8b-instant'), // mais rápido e determinístico que gpt-oss-120b
+      system: systemPrompt,
+      prompt: textoNormalizado,
+      temperature: 0.05,
+      maxTokens: 600,
+    });
+    text = result.text;
+    logStage('parser_groq_done', Date.now() - t0, {
+      len: text.length,
+    });
+  } catch (e: any) {
+    const elapsed = Date.now() - t0;
+    const isAbort = e?.name === 'AbortError' || e?.message?.includes('timeout');
+    logError('parser_groq', e, { elapsedMs: elapsed, isAbort });
+    // Propaga tipo de erro via campo não-canônico pro webhook tratar
+    // com mensagem apropriada (timeout vs erro técnico).
+    if (isAbort) {
+      return { intent: 'outro', confidence: 0, __error: 'timeout' } as any;
+    }
+    return { intent: 'outro', confidence: 0, __error: 'technical' } as any;
+  }
 
   // Extrai o JSON puro (modelo pode devolver lixo em volta)
   const match = text.match(/\{[\s\S]*?\}/);

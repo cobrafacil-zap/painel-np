@@ -11,7 +11,9 @@ import { PadroesPrevistos } from './_components/padroes-previstos';
 import { MetasMes } from './_components/metas-mes';
 import { AtalhosRapidos } from './_components/atalhos-rapidos';
 import { InstallPWAButton } from './_components/install-pwa-button';
+import { AudiosRecentes } from './_components/audios-recentes';
 import { PageHeader } from '../_components/page-header';
+import { getMetaDiaria, getGastoHoje } from '@/lib/financeiro/meta-diaria';
 
 export default async function PainelPage() {
   const supabase = await createClient();
@@ -31,7 +33,7 @@ export default async function PainelPage() {
   // 5 dias pra frente (pra heatmap)
   const hojeISO = new Date().toISOString().slice(0, 10);
 
-  // Fetch paralelo: tarefas pendentes, records mês, records 28 dias
+  // Fetch paralelo: tarefas pendentes, records mês, records 28 dias, meta diária + gasto de hoje
   const [tarefasRes, recordsMesRes, recordsRecentesRes, profileRes] = await Promise.all([
     supabase
       .from('tarefas')
@@ -61,6 +63,14 @@ export default async function PainelPage() {
       .select('full_name, evolution_instance_name, evolution_status')
       .eq('id', user.id)
       .single(),
+  ]);
+
+  // Meta diária + gasto de hoje (mini-ring do Hero). Funciona mesmo
+  // sem migration 014 aplicada — `getMetaDiaria` retorna null e o
+  // HeroSaldo decide não renderizar o ring.
+  const [metaDiaria, gastoHoje] = await Promise.all([
+    getMetaDiaria(user.id),
+    getGastoHoje(user.id),
   ]);
 
   const tarefas = (tarefasRes.data ?? []) as Tarefa[];
@@ -138,8 +148,14 @@ export default async function PainelPage() {
         action={<InstallPWAButton />}
       />
 
-      {/* HERO SALDO */}
-      <HeroSaldo receitas={receitas} gastos={gastos} saldo={saldo} />
+      {/* HERO SALDO (com mini-ring da meta diária se definida) */}
+      <HeroSaldo
+        receitas={receitas}
+        gastos={gastos}
+        saldo={saldo}
+        metaDiaria={metaDiaria}
+        gastoHoje={gastoHoje}
+      />
 
       {/* GRID: TAREFAS + ATALHOS */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-5">
@@ -172,6 +188,9 @@ export default async function PainelPage() {
         <PadroesPrevistos />
         <MetasMes />
       </div>
+
+      {/* ÁUDIOS RECENTES — full-width, sumário por IA (#overhaul audio) */}
+      <AudiosRecentes />
     </div>
   );
 }

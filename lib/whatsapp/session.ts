@@ -44,6 +44,15 @@ export interface SessionContext {
     snapshots?: Array<Record<string, unknown>>;
     ts: string;
   };
+  // Última ação do user que pode ser refinada em mensagem curta.
+  // Ex: depois de `meta_diaria_set({amount:60})`, frase "muda pra 80"
+  // vira `meta_diaria_update({amount:80})`. TTL da sessão (30min) é o
+  // limite de validade.
+  lastAction?: {
+    kind: string;
+    params: Record<string, unknown>;
+    ts: string;
+  };
   // Permite extensão por outras features
   [key: string]: unknown;
 }
@@ -124,5 +133,6 @@ export async function clearContext(
     lastDeletedRecord: undefined,
     lastBotMessageId: undefined,
     lastCreatedTarefaId: undefined,
+    lastAction: undefined,
   } as Partial<SessionContext>);
 }

@@ -14,6 +14,8 @@ import { generateText } from 'ai';
 import { createGroq } from '@ai-sdk/groq';
 import { numerosPorExtensoParaDigitos } from '@/lib/numeros';
 import { normalizarAcentos } from '@/lib/acentos';
+import { carregarContextoTarefa } from '@/lib/tarefas/patterns';
+import { logStage, logError } from '@/lib/log';
 import type { TokenData, TokenHora } from '@/lib/datas';
 
 export type TarefaParsedIntent =
@@ -347,8 +349,14 @@ function getGroq() {
 
 /**
  * Parser principal. Tenta regex local primeiro; se não bater, cai pro Groq.
+ *
+ * `opts.userId` é opcional — quando passado, injeta memória de padrões
+ * de tarefas (#overhaul, paralelo ao financeiro).
  */
-export async function parseTarefa(texto: string): Promise<TarefaParsedIntent> {
+export async function parseTarefa(
+  texto: string,
+  opts?: { userId?: string }
+): Promise<TarefaParsedIntent> {
   const textoNorm = numerosPorExtensoParaDigitos(texto);
 
   // 1. Local
@@ -358,20 +366,33 @@ export async function parseTarefa(texto: string): Promise<TarefaParsedIntent> {
   // Qualquer hit local >= 0.78 já é mais confiável que deixar o Groq
   // decidir (que erra muito sem contexto).
   if (local && local.confidence >= 0.78) {
-    console.log(`[parser-tarefa] local hit (${local.intent}, conf=${local.confidence})`);
+    logStage('parser_tarefa_local_hit', undefined, {
+      intent: local.intent,
+      confidence: local.confidence,
+    });
     return local;
   }
 
   // 2. Groq
   try {
     const groq = getGroq();
+
+    // Monta system prompt com contexto de tarefas do user (#overhaul)
+    let systemPrompt = SYSTEM_PROMPT;
+    if (opts?.userId) {
+      const contexto = await carregarContextoTarefa(opts.userId);
+      systemPrompt = SYSTEM_PROMPT + contexto;
+    }
+
+    const t0 = Date.now();
     const { text } = await generateText({
       model: groq('llama-3.1-8b-instant'),
-      system: SYSTEM_PROMPT,
+      system: systemPrompt,
       prompt: textoNorm,
       temperature: 0.05,
       maxTokens: 500,
     });
+    logStage('parser_tarefa_groq_done', Date.now() - t0, { len: text.length });
     const match = text.match(/\{[\s\S]*?\}/);
     if (!match) {
       if (local) return local;
@@ -384,7 +405,7 @@ export async function parseTarefa(texto: string): Promise<TarefaParsedIntent> {
       return { intent: 'tarefa_ambigua', confidence: 0, motivo: 'sem_data' };
     }
   } catch (e) {
-    console.error('parser-tarefa groq error:', e);
+    logError('parser_tarefa_groq', e);
     if (local) return local;
     return { intent: 'tarefa_ambigua', confidence: 0, motivo: 'sem_data' };
   }

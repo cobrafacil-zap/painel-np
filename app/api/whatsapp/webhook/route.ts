@@ -24,6 +24,17 @@ import { formatBRL, todayISO } from '@/lib/utils';
 import { getSession, setContext, clearContext } from '@/lib/whatsapp/session';
 import { detectarDuplicata, formatarMensagemDuplicata } from '@/lib/financeiro/dedup';
 import { extrairEntidades } from '@/lib/nlp/entities';
+import { getOrCompute as parserCacheGetOrCompute } from '@/lib/parser-cache';
+import { autoCategorize } from '@/lib/financeiro/categorias';
+import { logStage, logError } from '@/lib/log';
+import { recordParserStage } from '@/lib/parser-stats';
+import {
+  uploadAudio,
+  saveAudioMessage,
+  updateTranscription,
+  updateSummary,
+} from '@/lib/audio-storage';
+import { summarizeAudio } from '@/lib/audio-summary';
 import type { FinanceRecord } from '@/lib/types';
 
 // Fluid Compute: roda em São Paulo (gru1), perto do Contabo.
@@ -189,12 +200,66 @@ export async function POST(req: NextRequest) {
 
     if (audioBase64) {
       const mimeType = audioMsg.mimetype ?? 'audio/ogg';
-      console.log(`[webhook] transcrevendo áudio (${audioMsg.seconds ?? '?'}s, ${mimeType})`);
+      const duration = typeof audioMsg.seconds === 'number' ? audioMsg.seconds : null;
+      logStage('webhook_audio_recebido', undefined, {
+        mime: mimeType,
+        secs: duration,
+        msgId: messageId,
+      });
+
+      // 1. Upload pro Storage + INSERT inicial em `messages` (best-effort;
+      //    se falhar, ainda tentamos transcrever pra não bloquear o fluxo).
+      let audioRowId: string | null = null;
+      try {
+        const uploaded = await uploadAudio(audioBase64, mimeType, userId, messageId);
+        if (uploaded) {
+          const saved = await saveAudioMessage({
+            userId,
+            messageIdWhatsapp: messageId,
+            remoteJid,
+            instanceName: instanceFromPayload ?? null,
+            storagePath: uploaded.storage_path,
+            mimeType: uploaded.mime_type,
+            fileSizeBytes: uploaded.file_size_bytes,
+            durationSeconds: duration,
+          });
+          audioRowId = saved?.id ?? null;
+        }
+      } catch (e) {
+        logError('audio_persist_pre_transcribe', e, { msgId: messageId });
+      }
+
+      // 2. Transcreve via Whisper
       const transcricao = await transcreverAudio(audioBase64, mimeType);
+
       if (transcricao) {
-        console.log(`[webhook] transcrição: "${transcricao.slice(0, 80)}"`);
+        logStage('webhook_audio_transcrito', undefined, {
+          len: transcricao.length,
+          msgId: messageId,
+        });
+
+        // 3. UPDATE em `messages` com a transcrição (best-effort; falha
+        //    aqui NÃO bloqueia o pipeline do webhook).
+        if (audioRowId) {
+          void updateTranscription(audioRowId, transcricao, 0.85);
+        }
+
+        // 4. Sumário por IA inline (best-effort, tolerante a falha).
+        //    Roda em paralelo com o pipeline principal — não bloqueia.
+        if (audioRowId) {
+          void (async () => {
+            const summary = await summarizeAudio(transcricao);
+            if (summary) {
+              await updateSummary(audioRowId!, summary.summary, summary.topics, summary.entities);
+              logStage('audio_summary_done', undefined, { msgId: messageId });
+            }
+          })();
+        }
+
         Object.assign(message, { conversation: transcricao, __transcribed: true });
       } else {
+        // Transcrição falhou — mantém o áudio salvo (sumário vai ficar
+        // pendente) mas avisa o user.
         await safeSend(remoteJid, '⚠️ Não consegui transcrever o áudio. Tente enviar em texto.', instanceFromPayload);
         return NextResponse.json({ ok: true, skipped: 'transcribe_failed' });
       }
@@ -425,40 +490,92 @@ export async function POST(req: NextRequest) {
   // === CLASSIFICADOR DE MÓDULO (regex local, custo zero) ===
   // Decide qual parser chamar: financeiro (existente) ou tarefas (novo).
   const modulo = classificarModulo(texto);
-  console.log(`[webhook] classificarModulo=${modulo}`);
+  logStage('webhook_classify', undefined, { modulo });
 
-  let parsed: import('@/modules/financeiro/lib/parser-mensagem').ParsedIntent | import('@/modules/tarefas/lib/parser-mensagem').TarefaParsedIntent;
+  // Variáveis separadas por módulo — os tipos dos dois parsers não
+  // podem ser unificados (TarefaParsedIntent não estende ParsedIntent
+  // do financeiro). O union abaixo serve só pra roteamento; cada ramo
+  // faz seu próprio narrowing.
+  let parsedFinanceiro: import('@/modules/financeiro/lib/parser-mensagem').ParsedIntent | undefined;
+  let parsedTarefa: import('@/modules/tarefas/lib/parser-mensagem').TarefaParsedIntent | undefined;
+  let parsedIntent: string = 'outro';
+  let parsedConfidence: number = 0;
   try {
+    const t0 = Date.now();
     if (modulo === 'tarefas') {
-      parsed = await Promise.race([
-        parseTarefa(texto),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('parser-tarefa timeout')), 25_000)
-        ),
-      ]);
-    } else if (modulo === 'financeiro') {
-      parsed = await Promise.race([
-        parseMensagem(texto, { userId }),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('parser timeout')), 25_000)
-        ),
-      ]);
+      const tarefaResult = await parserCacheGetOrCompute(texto, () =>
+        Promise.race([
+          parseTarefa(texto, { userId }),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('parser-tarefa timeout')), 25_000)
+          ),
+        ])
+      );
+      parsedTarefa = tarefaResult;
+      parsedIntent = tarefaResult.intent;
+      parsedConfidence = tarefaResult.confidence;
     } else {
-      // 'outro' → cai pro financeiro (comportamento legado cobre cumprimentos,
-      // perguntas, etc.). Se for tarefa_ambigua, o financeiro devolve intent
-      // 'outro' e respondemos com a mensagem padrão.
-      parsed = await Promise.race([
-        parseMensagem(texto, { userId }),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('parser timeout')), 25_000)
-        ),
-      ]);
+      // financeiro OU outro — passa pelo cache
+      parsedFinanceiro = await parserCacheGetOrCompute(texto, () =>
+        Promise.race([
+          parseMensagem(texto, { userId }),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('parser timeout')), 25_000)
+          ),
+        ])
+      );
+      parsedIntent = parsedFinanceiro.intent;
+      parsedConfidence = parsedFinanceiro.confidence;
     }
+    logStage('webhook_parse_done', Date.now() - t0, {
+      intent: parsedIntent,
+      confidence: parsedConfidence,
+      modulo,
+    });
+    recordParserStage('parser_ok');
   } catch (e: any) {
-    console.error('parser error:', e);
+    const isTimeout = e?.message?.includes('timeout') || e?.name === 'AbortError';
+    logError('webhook_parse', e, { isTimeout });
+
+    if (isTimeout) {
+      recordParserStage('parser_timeout');
+      await safeSend(
+        remoteJid,
+        '⏱️ Demorei pra pensar. Tenta de novo com uma frase mais curta.',
+        instanceFromPayload,
+      );
+      return NextResponse.json({ ok: true, error: 'parser_timeout' });
+    }
+
+    // Erro técnico (campo __error injetado pelo parser-mensagem.ts)
+    const isTechnical =
+      (parsedFinanceiro as any)?.__error === 'technical' ||
+      (parsedTarefa as any)?.__error === 'technical';
+    if (isTechnical) {
+      recordParserStage('parser_error');
+      await safeSend(
+        remoteJid,
+        '⚠️ Erro técnico ao interpretar. Já anotei pra investigar.',
+        instanceFromPayload,
+      );
+      return NextResponse.json({ ok: true, error: 'parser_technical' });
+    }
+
+    recordParserStage('parser_error');
     await safeSend(remoteJid, '⚠️ Erro ao interpretar. Tente reformular.', instanceFromPayload);
     return NextResponse.json({ ok: true, error: 'parser' });
   }
+
+  // Alias pra legibilidade no switch abaixo. `let` porque o bloco de
+  // refinamento (linha 593) reatribui quando o user refina uma consulta.
+  let parsed: ParsedIntentTarefaOuFinanceiro =
+    (parsedFinanceiro as ParsedIntentTarefaOuFinanceiro | undefined) ??
+    (parsedTarefa as ParsedIntentTarefaOuFinanceiro | undefined) ??
+    ({ intent: 'outro', confidence: 0 } as ParsedIntentTarefaOuFinanceiro);
+
+  type ParsedIntentTarefaOuFinanceiro =
+    | import('@/modules/financeiro/lib/parser-mensagem').ParsedIntent
+    | import('@/modules/tarefas/lib/parser-mensagem').TarefaParsedIntent;
 
   // 4. Roteamento por intent
   // === Tarefas ===
@@ -619,10 +736,27 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // === AUTO-CATEGORIA (#overhaul) ===
+    // Se parser não classificou, tenta Groq + UPSERT em categories.
+    // Roda antes do INSERT pra usar o slug novo direto na confirmação.
+    let autoCategoriaNova = false;
+    let categoriaFinal = p.category;
+    if (!categoriaFinal) {
+      try {
+        const auto = await autoCategorize(userId, texto, null);
+        if (auto?.slug) {
+          categoriaFinal = auto.slug;
+          autoCategoriaNova = auto.isNew;
+        }
+      } catch (e) {
+        logError('webhook_auto_categoria', e);
+      }
+    }
+
     // Pre-monta a string de confirmação (sem await, é puro)
     const sinal = p.type === 'gasto' ? '−' : '+';
     const tipoLabel = p.type === 'gasto' ? 'Gasto' : 'Receita';
-    const catLabel = p.category ? ` em '${p.category}'` : '';
+    const catLabel = categoriaFinal ? ` em '${categoriaFinal}'` : '';
     const confirmacao = `✅ ${tipoLabel} de ${sinal}${formatBRL(p.amount)}${catLabel} registrado.`;
 
     // NER leve (#6): extrai entidades pra filtro futuro
@@ -638,7 +772,7 @@ export async function POST(req: NextRequest) {
           module_id: 'financeiro',
           type: p.type,
           amount: p.amount,
-          category: p.category,
+          category: categoriaFinal,
           description: p.description,
           payment_method: p.payment_method,
           occurred_at: p.occurred_at ?? todayISO(),
@@ -648,6 +782,8 @@ export async function POST(req: NextRequest) {
             remote_jid: remoteJid,
             parsed_confidence: p.confidence,
             entities, // #6
+            auto_category: autoCategoriaNova,
+            ...(autoCategoriaNova && categoriaFinal ? { auto_category_slug: categoriaFinal } : {}),
           },
         })
         .select()
@@ -834,6 +970,33 @@ export async function POST(req: NextRequest) {
   }
 
   // === META DIÁRIA (#extra) ===
+  // Refinamento contextual (#overhaul Fase 3):
+  // Se a última ação do user foi definir meta_diaria_set e a mensagem
+  // atual é um comando curto de "muda/agora/passa pra X", interpretamos
+  // como update sem precisar do parser completo.
+  if (instanceFromPayload) {
+    const sess = await getSession(userId, remoteJid, instanceFromPayload);
+    if (sess.lastAction?.kind === 'meta_diaria_set') {
+      const tl = texto.trim().toLowerCase();
+      const mudaMatch = tl.match(
+        /^(?:muda(?:r)?|agora|passa(?:r)?|troca(?:r)?|altera(?:r)?|bota(?:r)?|coloca(?:r)?)\s+(?:pra|para|pra)\s*(\d+(?:[,\.]\d+)?)\b/,
+      );
+      if (mudaMatch) {
+        const novoValor = parseFloat(mudaMatch[1].replace(',', '.'));
+        if (Number.isFinite(novoValor) && novoValor > 0) {
+          logStage('meta_diaria_update_refinado', undefined, { from: sess.lastAction.params.amount, to: novoValor });
+          const result = await setMetaDiaria(userId, novoValor);
+          await safeSend(remoteJid, result.reply, instanceFromPayload);
+          // Atualiza lastAction com novo valor
+          await setContext(userId, remoteJid, instanceFromPayload, {
+            lastAction: { kind: 'meta_diaria_set', params: { amount: novoValor }, ts: new Date().toISOString() },
+          });
+          return NextResponse.json({ ok: true, intent: 'meta_diaria_update', amount: novoValor });
+        }
+      }
+    }
+  }
+
   if (
     parsed.intent === 'meta_diaria_set' ||
     parsed.intent === 'meta_diaria_get' ||
@@ -861,6 +1024,14 @@ export async function POST(req: NextRequest) {
       result = await deleteMetaDiaria(userId);
     }
     await safeSend(remoteJid, result.reply, instanceFromPayload);
+
+    // Grava lastAction pra próximo refinamento (#overhaul Fase 3)
+    if (instanceFromPayload && result.ok && m.intent === 'meta_diaria_set') {
+      await setContext(userId, remoteJid, instanceFromPayload, {
+        lastAction: { kind: 'meta_diaria_set', params: { amount: m.amount }, ts: new Date().toISOString() },
+      });
+    }
+
     return NextResponse.json({ ok: true, intent: m.intent });
   }
 
@@ -937,5 +1108,28 @@ function classificarModulo(texto: string): 'financeiro' | 'tarefas' | 'outro' {
   // Só data pura sem hora também entra (vira tarefa tipo "prazo").
   if ((temDataRelativa || temHoraExplicita) && !temVerboFinanceiro) return 'tarefas';
   // Sem marcadores fortes
+  if (ehFraseMetaDiaria(t)) return 'financeiro';
   return 'outro';
+}
+
+/**
+ * Meta Diária: "Meta de 60 reais gastos diariamente", "teto diário 150",
+ * "posso gastar 100 por dia", "configurar meta diária 100", "definir
+ * limite por dia". O `classificarModulo` acima exige verbo financeiro
+ * + valor monetário (regex `temValorMonetario`), mas "meta diária 60"
+ * não tem verbo conjugado nem decimal — caía em `'outro'` e o bot
+ * respondia "Não entendi". Regra explícita antes do fallthrough:
+ * se a frase tem palavras de meta (meta/limite/teto/máximo) E palavras
+ * de temporalidade diária (diário/diariamente/por dia), é financeiro —
+ * os regex novos do parser (`metaFlex`/`metaTeto`/`metaConfig`/
+ * `metaPosso` em `modules/financeiro/lib/parser-mensagem.ts`) tratam.
+ */
+function ehFraseMetaDiaria(texto: string): boolean {
+  const t = normalizarAcentos(texto.toLowerCase()).trim();
+  const temMeta =
+    /\b(meta|limite|teto|m[áa]ximo|m[áa]xim[ao]|or[çc]amento)\b/.test(t);
+  const temDiario =
+    /\b(di[áa]ri[ao]|diariamente|por\s+dia|de\s+dia|do\s+dia)\b/.test(t);
+  // Combinação obrigatória: meta + diário (em qualquer ordem).
+  return temMeta && temDiario;
 }
