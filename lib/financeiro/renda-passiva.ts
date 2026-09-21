@@ -1,28 +1,17 @@
 /**
- * Cálculos de renda passiva (#feature renda-passiva).
+ * Cálculos puros de renda passiva (#feature renda-passiva).
  *
- * 4 cenários com taxa real líquida a.m. conservadora:
- *   - Conservador (Tesouro Selic / CDB liquidez): 0,5% a.m. (~6,2% a.a.)
- *   - Moderado (FIIs + alguns dividendos): 1,0% a.m. (~12,7% a.a.)
- *   - Agressivo (carteira de dividendos bem montada): 1,5% a.m. (~19,6% a.a.)
- *   - Cripto (stake de blue chips, mais volátil): 3,0% a.m. (~42% a.a.)
+ * SEM dependência de next/headers — pode ser importado de componentes
+ * client sem quebrar o build.
  *
- * Conceito: "capital necessário HOJE" = renda_desejada / taxa_mensal.
- *   Ex: 700/mês ÷ 0,001 (0,1%) = R$ 700.000 (exemplo do user).
- *   Ex: 700/mês ÷ 0,01 (1%) = R$ 70.000.
- *
- * Conceito 2: "tempo até atingir" = FV de série com aportes. Dado aporte
- * mensal e taxa, quanto tempo leva pra acumular o capital necessário?
- *
- *   FV = PMT × [((1 + i)^n - 1) / i]
- *   isolando n: n = log(1 + FV*i/PMT) / log(1 + i)
+ * Operações de DB em `renda-passiva-db.ts`.
  */
 
 export interface CenarioRendaPassiva {
   id: 'conservador' | 'moderado' | 'agressivo' | 'cripto';
   label: string;
-  taxa_mensal: number; // ex: 0.01 = 1% a.m.
-  taxa_anual: number; // ex: 0.127 ≈ 12.7% a.a.
+  taxa_mensal: number;
+  taxa_anual: number;
   descricao: string;
 }
 
@@ -57,13 +46,6 @@ export const CENARIOS: CenarioRendaPassiva[] = [
   },
 ];
 
-/**
- * Capital necessário HOJE pra gerar renda_desejada com a taxa.
- * Fórmula: capital = renda / taxa
- *
- * @param rendaMensalDesejada renda mensal desejada em R$
- * @param taxaMensal taxa em decimal (0.01 = 1% a.m.)
- */
 export function calcularCapitalNecessario(
   rendaMensalDesejada: number,
   taxaMensal: number,
@@ -72,45 +54,26 @@ export function calcularCapitalNecessario(
   return rendaMensalDesejada / taxaMensal;
 }
 
-/**
- * Calcula em quantos meses o capital_alvo é atingido dado aporte mensal.
- * Usa FV de série: FV = PMT × [((1 + i)^n - 1) / i]
- * Isolando n: n = log(1 + FV*i/PMT) / log(1 + i)
- *
- * Retorna null se aporte for zero (sem aporte, só juro sobre 0 inicial → nunca).
- * Retorna Infinity se taxa=0 (sem rendimento, aporte linear).
- * Retorna 0 se FV <= 0.
- */
 export function calcularMesesAteCapital(
   capitalAlvo: number,
   aporteMensal: number,
   taxaMensal: number,
 ): number | null {
   if (capitalAlvo <= 0) return 0;
-  if (aporteMensal <= 0) return null; // sem aporte, nunca atinge (a menos que já tenha)
-  if (taxaMensal === 0) {
-    return Math.ceil(capitalAlvo / aporteMensal);
-  }
-  // n = ln(1 + FV*i/PMT) / ln(1 + i)
+  if (aporteMensal <= 0) return null;
+  if (taxaMensal === 0) return Math.ceil(capitalAlvo / aporteMensal);
   const numerador = Math.log(1 + (capitalAlvo * taxaMensal) / aporteMensal);
   const denominador = Math.log(1 + taxaMensal);
   if (denominador <= 0) return null;
   return Math.ceil(numerador / denominador);
 }
 
-/**
- * Projeta valor acumulado em N meses dado aporte + taxa.
- */
 export function projetarValorAcumulado(
   aporteMensal: number,
   taxaMensal: number,
   meses: number,
   capitalInicial: number = 0,
-): {
-  valorFinal: number;
-  totalAportado: number;
-  jurosGanhos: number;
-} {
+): { valorFinal: number; totalAportado: number; jurosGanhos: number } {
   if (meses <= 0) {
     return { valorFinal: capitalInicial, totalAportado: 0, jurosGanhos: 0 };
   }
@@ -135,15 +98,11 @@ export interface LinhaCenario {
   anos_ate_atingir: number | null;
 }
 
-/**
- * Calcula todas as 4 linhas de cenário dado renda e aporte.
- */
 export function simularRendaPassiva(params: {
   rendaMensalDesejada: number;
   aporteMensal: number;
 }): LinhaCenario[] {
   const { rendaMensalDesejada, aporteMensal } = params;
-
   return CENARIOS.map((c) => {
     const capitalNecessario = calcularCapitalNecessario(rendaMensalDesejada, c.taxa_mensal);
     const meses = calcularMesesAteCapital(capitalNecessario, aporteMensal, c.taxa_mensal);
@@ -156,11 +115,6 @@ export function simularRendaPassiva(params: {
   });
 }
 
-/**
- * Formata meses em texto PT-BR legível.
- *   24 → "2 anos"
- *   30 → "2 anos e 6 meses"
- */
 export function formatarPrazo(meses: number | null): string {
   if (meses == null) return '— (aporte zerado)';
   if (meses === 0) return 'hoje';
@@ -171,4 +125,13 @@ export function formatarPrazo(meses: number | null): string {
   return `${anos} ${anos === 1 ? 'ano' : 'anos'} e ${mesesRestantes} ${
     mesesRestantes === 1 ? 'mês' : 'meses'
   }`;
+}
+
+// Tipo exportado pra camada DB
+export interface Deposito {
+  id: string;
+  cenario: string;
+  valor: number;
+  descricao: string | null;
+  occurred_at: string;
 }

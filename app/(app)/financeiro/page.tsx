@@ -3,8 +3,7 @@
 import { useState } from 'react';
 import { LancamentoForm } from './_components/lancamento-form';
 import { ResumoCharts } from './_components/resumo-charts';
-import { RendaPassivaCard } from './_components/renda-passiva-card';
-import { ArrowRight, ListChecks, ScrollText, Tags } from 'lucide-react';
+import { ArrowRight, ListChecks, ScrollText, Tags, TrendingUp } from 'lucide-react';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { PageHeader } from '../_components/page-header';
@@ -13,6 +12,12 @@ export default function FinanceiroPage() {
   const [refreshKey, setRefreshKey] = useState(0);
 
   const atalhos = [
+    {
+      href: '/financeiro/renda-passiva',
+      icon: TrendingUp,
+      titulo: 'Renda passiva',
+      subtitulo: 'Quanto preciso pra parar de trabalhar',
+    },
     {
       href: '/financeiro/lancamentos',
       icon: ListChecks,
@@ -52,21 +57,28 @@ export default function FinanceiroPage() {
         }
       />
 
-      {/* Card de planejamento de renda passiva (#feature renda-passiva).
-          Aparece no topo, antes dos atalhos — é o "para quê" de toda a parte financeira. */}
-      <RendaPassivaCard />
-
-      {/* Atalhos pros sub-páginas */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      {/* Atalhos pros sub-páginas (incluindo renda-passiva como destaque) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
         {atalhos.map((a) => {
           const Icon = a.icon;
+          const destaque = a.href === '/financeiro/renda-passiva';
           return (
             <Link
               key={a.href}
               href={a.href}
-              className="group glass p-4 flex items-center gap-3 hover:border-white/[0.12] hover:bg-white/[0.04] transition-all"
+              className={`group p-4 flex items-center gap-3 transition-all border ${
+                destaque
+                  ? 'glass-elevated border-emerald-500/30 hover:border-emerald-500/50 bg-emerald-500/[0.04]'
+                  : 'glass hover:border-white/[0.12] hover:bg-white/[0.04]'
+              }`}
             >
-              <div className="shrink-0 w-10 h-10 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
+              <div
+                className={`shrink-0 w-10 h-10 rounded-lg flex items-center justify-center ${
+                  destaque
+                    ? 'bg-emerald-500/20 border border-emerald-500/30'
+                    : 'bg-emerald-500/10 border border-emerald-500/20'
+                }`}
+              >
                 <Icon className="w-4 h-4 text-emerald-300" />
               </div>
               <div className="flex-1 min-w-0">
