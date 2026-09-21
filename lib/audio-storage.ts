@@ -24,7 +24,10 @@ import { logStage, logError } from './log';
 
 const BUCKET = 'audios';
 const SIGNED_URL_TTL_S = 60 * 60 * 24; // 24h
-const MAX_FILE_SIZE_BYTES = 2 * 1024 * 1024; // 2MB — Whisper aceita até 25MB mas o WhatsApp raramente passa de 2MB
+// Limite duro: 1MB. Áudios do WhatsApp raramente passam disso e é o
+// que cabe confortável no Supabase Storage sem inchar o projeto.
+// Acima disso, salvamos transcrição+sumário mas NÃO o arquivo.
+const MAX_FILE_SIZE_BYTES = 1 * 1024 * 1024;
 
 const MIME_TO_EXT: Record<string, string> = {
   'audio/ogg': 'ogg',
@@ -46,28 +49,33 @@ function extFromMime(mime: string | undefined | null): string {
  * Sobe o áudio pro Storage. Retorna path ou null em erro.
  * Path segue padrão `audios/{user_id}/{message_id}.{ext}` — particionado
  * por user pra RLS funcionar com `foldername(name)[1] = auth.uid()`.
+ *
+ * Se o áudio passar de MAX_FILE_SIZE_BYTES, retorna `{ skipped: true }`
+ * — o caller (webhook) deve salvar a row com `audio_storage_path=null`
+ * mas manter transcrição + sumário. Mantém o projeto enxuto.
  */
+export type UploadAudioResult =
+  | { storage_path: string; mime_type: string; file_size_bytes: number; skipped?: false }
+  | { skipped: true; reason: 'too_big' | 'empty'; file_size_bytes: number }
+  | null;
+
 export async function uploadAudio(
   base64: string,
   mimeType: string | null | undefined,
   userId: string,
   messageId: string,
-): Promise<{
-  storage_path: string;
-  mime_type: string;
-  file_size_bytes: number;
-} | null> {
+): Promise<UploadAudioResult> {
   try {
     const buffer = Buffer.from(base64, 'base64');
     if (buffer.byteLength === 0) {
       logError('audio_upload_empty', new Error('base64 vazio'), { userId });
-      return null;
+      return { skipped: true, reason: 'empty', file_size_bytes: 0 };
     }
     if (buffer.byteLength > MAX_FILE_SIZE_BYTES) {
       logError('audio_upload_too_big', new Error(`>${MAX_FILE_SIZE_BYTES} bytes`), {
         size: buffer.byteLength,
       });
-      return null;
+      return { skipped: true, reason: 'too_big', file_size_bytes: buffer.byteLength };
     }
 
     const ext = extFromMime(mimeType);
@@ -98,17 +106,21 @@ export async function uploadAudio(
 
 /**
  * INSERT inicial em `messages` com type='audio'. Idempotente via
- * ON CONFLICT DO NOTHING — se a msg já existe (reentrega da Evolution),
- * retorna o id existente sem erro.
+ * UNIQUE (user_id, message_id_whatsapp) — se a msg já existe (reentrega
+ * da Evolution), retorna o id existente sem erro.
+ *
+ * Aceita `storagePath=null` quando o upload foi pulado por limite de
+ * tamanho. Nesse caso, transcrição+sumário são preservados mas o
+ * arquivo de áudio nunca é persistido.
  */
 export async function saveAudioMessage(params: {
   userId: string;
   messageIdWhatsapp: string;
   remoteJid: string;
   instanceName: string | null;
-  storagePath: string;
-  mimeType: string;
-  fileSizeBytes: number;
+  storagePath: string | null;
+  mimeType: string | null;
+  fileSizeBytes: number | null;
   durationSeconds: number | null;
 }): Promise<{ id: string; created: boolean } | null> {
   try {

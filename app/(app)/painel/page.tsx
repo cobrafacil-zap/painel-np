@@ -11,7 +11,6 @@ import { PadroesPrevistos } from './_components/padroes-previstos';
 import { MetasMes } from './_components/metas-mes';
 import { AtalhosRapidos } from './_components/atalhos-rapidos';
 import { InstallPWAButton } from './_components/install-pwa-button';
-import { AudiosRecentes } from './_components/audios-recentes';
 import { PageHeader } from '../_components/page-header';
 import { getMetaDiaria, getGastoHoje } from '@/lib/financeiro/meta-diaria';
 
@@ -188,9 +187,6 @@ export default async function PainelPage() {
         <PadroesPrevistos />
         <MetasMes />
       </div>
-
-      {/* ÁUDIOS RECENTES — full-width, sumário por IA (#overhaul audio) */}
-      <AudiosRecentes />
     </div>
   );
 }

@@ -10,7 +10,6 @@ import {
   ListChecks,
   ScrollText,
   ListTodo,
-  Mic,
   X,
 } from 'lucide-react';
 import { LogoutButton } from '../_components/logout-button';
@@ -142,16 +141,6 @@ export function Sidebar({ open, onClose, profile }: SidebarProps) {
           onClick={onClose}
         >
           Tarefas
-        </SidebarLink>
-
-        {/* Áudios (#overhaul audio — memória do WhatsApp) */}
-        <SidebarLink
-          href="/audios"
-          icon={<Mic className="w-4 h-4" />}
-          active={pathname.startsWith('/audios')}
-          onClick={onClose}
-        >
-          Áudios
         </SidebarLink>
 
         {/* WhatsApp */}

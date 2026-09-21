@@ -208,11 +208,13 @@ export async function POST(req: NextRequest) {
       });
 
       // 1. Upload pro Storage + INSERT inicial em `messages` (best-effort;
-      //    se falhar, ainda tentamos transcrever pra não bloquear o fluxo).
+      //    se falhar ou passar do limite de tamanho, ainda tentamos
+      //    transcrever pra não bloquear o fluxo — transcrição+sumário
+      //    ficam preservados mesmo sem o arquivo).
       let audioRowId: string | null = null;
       try {
         const uploaded = await uploadAudio(audioBase64, mimeType, userId, messageId);
-        if (uploaded) {
+        if (uploaded && !uploaded.skipped) {
           const saved = await saveAudioMessage({
             userId,
             messageIdWhatsapp: messageId,
@@ -220,6 +222,20 @@ export async function POST(req: NextRequest) {
             instanceName: instanceFromPayload ?? null,
             storagePath: uploaded.storage_path,
             mimeType: uploaded.mime_type,
+            fileSizeBytes: uploaded.file_size_bytes,
+            durationSeconds: duration,
+          });
+          audioRowId = saved?.id ?? null;
+        } else if (uploaded?.skipped) {
+          // Áudio pulou o upload (muito grande). Salva row com path=null
+          // — transcrição+sumário ficam, arquivo não.
+          const saved = await saveAudioMessage({
+            userId,
+            messageIdWhatsapp: messageId,
+            remoteJid,
+            instanceName: instanceFromPayload ?? null,
+            storagePath: null,
+            mimeType: mimeType,
             fileSizeBytes: uploaded.file_size_bytes,
             durationSeconds: duration,
           });
@@ -668,9 +684,55 @@ export async function POST(req: NextRequest) {
   }
 
   if (parsed.intent === 'outro' || parsed.confidence < 0.75) {
+    // Detector de "pergunta sobre mim": cai aqui quando o user manda
+    // coisas como "o que você faz", "quem é você", "ajuda", "menu".
+    // Antes do fallthrough genérico.
+    const textoNorm = texto.trim().toLowerCase();
+    const ehPerguntaSobreBot =
+      /^\s*(o\s+que\s+(você|vc|voce)\s+(faz|sabe|consegue|pode)\s+fazer|quem\s+(é|e)\s+você|ajuda|help|menu|comandos?|o\s+que\s+(você|vc)\s+é|para\s+que\s+(você|vc)\s+serv|quais?\s+(coisas?|comandos?)\s+(você|vc)\s+(faz|sabe))\s*[?.!]?\s*$/i.test(
+        textoNorm,
+      );
+
+    if (ehPerguntaSobreBot) {
+      await safeSend(
+        remoteJid,
+        [
+          '🤖 Sou seu painel no WhatsApp. Posso:',
+          '',
+          '💸 *Lançamentos*',
+          '• "gastei 50 no mercado" → registra gasto',
+          '• "recebi 1500 de freelance" → registra receita',
+          '• "comprei um ingresso de 150" → cria categoria se não existir',
+          '',
+          '📊 *Consultas*',
+          '• "quanto gastei esse mês?"',
+          '• "qual meu saldo?"',
+          '• "top categorias"',
+          '',
+          '✅ *Tarefas*',
+          '• "tarefa pagar conta amanhã 14h"',
+          '• "lista de tarefas"',
+          '• "concluir tarefa X"',
+          '',
+          '🎯 *Metas*',
+          '• "meta de 60 reais por dia"',
+          '• "muda pra 80"',
+          '',
+          '📅 *Compromissos*',
+          '• "aluguel dia 5 todo mês"',
+          '',
+          '🎙️ *Áudio* — manda áudio que eu transcrevo, sumo o que você disse e gravo na sua memória pra você buscar depois.',
+          '',
+          '💡 Dica: fala natural que eu entendo. Se travar, manda "ajuda" de novo.',
+        ].join('\n'),
+        instanceFromPayload,
+      );
+      return NextResponse.json({ ok: true, intent: 'help' });
+    }
+
     await safeSend(
       remoteJid,
-      '🤔 Não entendi. Pode reformular?\n\nExemplos:\n• "gastei 50 no mercado"\n• "recebi 1500 de freelance"\n• "quanto gastei esse mês?"',
+      '🤔 Não entendi. Pode reformular?\n\nExemplos:\n• "gastei 50 no mercado"\n• "recebi 1500 de freelance"\n• "quanto gastei esse mês?"\n\nOu manda "ajuda" pra ver o que eu sei fazer.',
       instanceFromPayload,
     );
     return NextResponse.json({ ok: true, intent: 'outro' });
