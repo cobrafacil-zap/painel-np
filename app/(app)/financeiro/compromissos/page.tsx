@@ -344,10 +344,15 @@ function CompromissoModal({
   const [recorrencia, setRecorrencia] = useState(compromisso?.recorrencia ?? 'mensal');
   const [dataVenc, setDataVenc] = useState(compromisso?.data_vencimento ?? '');
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   async function save() {
     const v = parseFloat(valorTotal.replace(',', '.'));
-    if (!descricao.trim() || !v || v <= 0) return;
+    if (!descricao.trim() || !v || v <= 0) {
+      setSaveError('Preencha descrição e valor maior que zero.');
+      return;
+    }
+    setSaveError(null);
     setSaving(true);
     const payload = {
       tipo,
@@ -359,13 +364,26 @@ function CompromissoModal({
     };
     const url = compromisso ? `/api/financeiro/compromissos/${compromisso.id}` : '/api/financeiro/compromissos';
     const method = compromisso ? 'PATCH' : 'POST';
-    const res = await fetch(url, {
-      method,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    setSaving(false);
-    if (res.ok) onSaved();
+    try {
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        const msg =
+          errBody.reply ?? errBody.error ?? errBody.message ?? `Erro ${res.status} ao salvar.`;
+        setSaveError(typeof msg === 'string' ? msg : JSON.stringify(msg));
+        setSaving(false);
+        return;
+      }
+      onSaved();
+    } catch (e: any) {
+      setSaveError(`Erro de rede: ${e?.message ?? 'desconhecido'}`);
+    } finally {
+      setSaving(false);
+    }
   }
 
   const valorParcela = valorTotal && totalParcelas > 1 ? parseFloat(valorTotal) / totalParcelas : 0;
@@ -454,6 +472,12 @@ function CompromissoModal({
           <p className="text-xs text-zinc-400">
             = {totalParcelas}x de <span className="text-zinc-200 tabular-nums">{formatBRL(valorParcela)}</span>
           </p>
+        )}
+
+        {saveError && (
+          <div className="rounded-md bg-red-500/10 border border-red-500/30 px-3 py-2 text-xs text-red-300">
+            ❌ {saveError}
+          </div>
         )}
 
         <div>
