@@ -1,9 +1,19 @@
-import RendaPassivaPage from '../_components/renda-passiva-card';
+/**
+ * Redirect legado: /financeiro/renda-passiva → /financeiro/investimentos?tab=renda-passiva
+ *
+ * A feature foi unificada em /financeiro/investimentos com 2 abas.
+ * Mantemos esse arquivo pra preservar bookmarks e links antigos.
+ */
 
-export const metadata = {
-  title: 'Renda passiva · Painel NP',
-};
+'use client';
 
-export default function Page() {
-  return <RendaPassivaPage />;
+import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+
+export default function RendaPassivaLegacyPage() {
+  const router = useRouter();
+  useEffect(() => {
+    router.replace('/financeiro/investimentos?tab=renda-passiva');
+  }, [router]);
+  return null;
 }

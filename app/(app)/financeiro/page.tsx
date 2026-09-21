@@ -13,10 +13,10 @@ export default function FinanceiroPage() {
 
   const atalhos = [
     {
-      href: '/financeiro/renda-passiva',
+      href: '/financeiro/investimentos',
       icon: TrendingUp,
-      titulo: 'Renda passiva',
-      subtitulo: 'Quanto preciso pra parar de trabalhar',
+      titulo: 'Investimentos',
+      subtitulo: 'Reserva de emergência + renda passiva',
     },
     {
       href: '/financeiro/lancamentos',
@@ -61,7 +61,7 @@ export default function FinanceiroPage() {
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
         {atalhos.map((a) => {
           const Icon = a.icon;
-          const destaque = a.href === '/financeiro/renda-passiva';
+          const destaque = a.href === '/financeiro/investimentos';
           return (
             <Link
               key={a.href}
