@@ -36,6 +36,17 @@ import {
   updateSummary,
 } from '@/lib/audio-storage';
 import { summarizeAudio } from '@/lib/audio-summary';
+import {
+  uploadFoodPhoto,
+  saveFoodPhotoMessage,
+  saveRefeicao,
+} from '@/lib/food-photo-storage';
+import {
+  analyzeFoodPhoto,
+  analyzeFoodPhotoDetailed,
+  inferirMealType,
+  pedidoAnaliseDetalhada,
+} from '@/lib/food-summary';
 import type { FinanceRecord } from '@/lib/types';
 
 // Fluid Compute: roda em São Paulo (gru1), perto do Contabo.
@@ -285,6 +296,226 @@ export async function POST(req: NextRequest) {
       await safeSend(remoteJid, '⚠️ Não consegui baixar o áudio. Tente reenviar.', instanceFromPayload);
       return NextResponse.json({ ok: true, skipped: 'no_audio_base64' });
     }
+  }
+
+  // === FOTO DE COMIDA: imageMessage → análise de macros ===
+  // Caminho espelha o áudio: webhookBase64:true entrega o base64 direto;
+  // fallback via /chat/getBase64FromMediaMessage se a Evolution 2.3.7
+  // ignorar a config (mesma situação do áudio).
+  //
+  // Se a foto tem caption (texto junto da imagem), ele vira hint pro
+  // Gemini — só se consistente com a foto. Se não, vai só pela imagem.
+  //
+  // Diferente do áudio: NÃO segue no pipeline de texto. Foto de comida
+  // é um intent separado que responde direto e retorna.
+  const imageMsg =
+    message?.imageMessage ??
+    message?.ephemeralMessage?.message?.imageMessage ??
+    null;
+  if (imageMsg) {
+    let imageBase64: string | undefined =
+      message?.base64 ?? message?.ephemeralMessage?.message?.base64;
+    const caption: string =
+      imageMsg.caption ||
+      message?.imageMessage?.caption ||
+      message?.ephemeralMessage?.message?.imageMessage?.caption ||
+      '';
+
+    // Fallback: baixa via Evolution API se base64 não veio inline
+    if (!imageBase64 && messageId && instanceFromPayload) {
+      try {
+        const cfg = await import('@/lib/evolution').then((m) => m.evolutionGlobalConfig());
+        const r = await fetch(
+          `${cfg.baseUrl}/chat/getBase64FromMediaMessage/${instanceFromPayload}`,
+          {
+            method: 'POST',
+            headers: { apikey: cfg.apiKey, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              message: { key: { id: messageId }, messageType: 'imageMessage' },
+            }),
+            signal: AbortSignal.timeout(30_000),
+          },
+        );
+        if (r.ok) {
+          const j = (await r.json()) as { base64?: string };
+          imageBase64 = j.base64;
+        } else {
+          console.warn(`[webhook] getBase64FromMediaMessage(image) HTTP ${r.status}`);
+        }
+      } catch (e) {
+        console.error('[webhook] erro ao baixar imagem:', e);
+      }
+    }
+
+    if (!imageBase64) {
+      console.warn('[webhook] imageMessage sem base64');
+      await safeSend(remoteJid, '⚠️ Não consegui baixar a foto. Tente reenviar.', instanceFromPayload);
+      return NextResponse.json({ ok: true, skipped: 'no_image_base64' });
+    }
+
+    const mimeType = imageMsg.mimetype ?? 'image/jpeg';
+    logStage('webhook_food_photo_recebido', undefined, {
+      mime: mimeType,
+      hasCaption: caption.length > 0,
+      msgId: messageId,
+    });
+
+    // 1. Upload pro Storage + INSERT em messages (best-effort)
+    let photoRowId: string | null = null;
+    try {
+      const uploaded = await uploadFoodPhoto(imageBase64, mimeType, userId, messageId);
+      if (uploaded && !uploaded.skipped) {
+        const saved = await saveFoodPhotoMessage({
+          userId,
+          messageIdWhatsapp: messageId,
+          remoteJid,
+          instanceName: instanceFromPayload ?? null,
+          storagePath: uploaded.storage_path,
+          mimeType: uploaded.mime_type,
+          fileSizeBytes: uploaded.file_size_bytes,
+        });
+        photoRowId = saved?.id ?? null;
+      } else if (uploaded?.skipped) {
+        // Foto rejeitada (muito grande, vazia, ou não-imagem).
+        // Salva row com path=null pra preservar o histórico da análise.
+        const saved = await saveFoodPhotoMessage({
+          userId,
+          messageIdWhatsapp: messageId,
+          remoteJid,
+          instanceName: instanceFromPayload ?? null,
+          storagePath: null,
+          mimeType,
+          fileSizeBytes: uploaded.file_size_bytes,
+        });
+        photoRowId = saved?.id ?? null;
+        if (uploaded.skipped && uploaded.reason === 'not_image') {
+          await safeSend(
+            remoteJid,
+            '⚠️ Esse arquivo não parece uma imagem. Manda uma foto da comida.',
+            instanceFromPayload,
+          );
+          return NextResponse.json({ ok: true, skipped: 'not_image' });
+        }
+      }
+    } catch (e) {
+      logError('food_photo_persist', e, { msgId: messageId });
+    }
+
+    // 2. Analisa via Gemini (fallback Groq) — bloqueia aqui pra responder
+    //    com os macros. Não fire-and-forget porque o user espera resposta.
+    const horaBRT = new Intl.DateTimeFormat('pt-BR', {
+      timeZone: 'America/Sao_Paulo',
+      hour: '2-digit',
+      hour12: false,
+    }).formatToParts(new Date());
+    const horaNum = parseInt(horaBRT.find((p) => p.type === 'hour')?.value ?? '12', 10);
+
+    // Detecta modo: silencioso (default) ou detalhado (se caption pede)
+    const querDetalhado = pedidoAnaliseDetalhada(caption);
+
+    // Modo silencioso: extrai macros estruturados
+    const analise = await analyzeFoodPhoto({
+      base64: imageBase64,
+      mimeType,
+      caption: caption || null,
+      horaAtualBRT: { hora: horaNum },
+    });
+
+    // 3. INSERT em refeicoes (1:1 com messages.id)
+    if (photoRowId && analise) {
+      const refeicao = await saveRefeicao({
+        userId,
+        messageId: photoRowId,
+        data: {
+          kcal: analise.kcal,
+          protein_g: analise.protein_g,
+          carb_g: analise.carb_g,
+          fat_g: analise.fat_g,
+          portion_g: analise.portion_g,
+          meal_type: analise.meal_type,
+          confidence: analise.confidence,
+          ai_model: 'gemini-2.5-flash-lite',
+          descricao_user: caption || null,
+          itens: analise.itens,
+        },
+      });
+      if (refeicao) {
+        logStage('refeicao_saved', undefined, {
+          meal: analise.meal_type,
+          kcal: analise.kcal,
+          model: 'gemini-2.5-flash-lite',
+        });
+      }
+    }
+
+    // 4. Resposta pro WhatsApp
+    if (querDetalhado) {
+      // === MODO DETALHADO: pede análise estilo nutricionista ===
+      const detalhada = await analyzeFoodPhotoDetailed({
+        base64: imageBase64,
+        mimeType,
+        caption: caption || null,
+        horaAtualBRT: { hora: horaNum },
+      });
+
+      if (!detalhada) {
+        await safeSend(
+          remoteJid,
+          '❌ Não consegui gerar a análise detalhada. Tenta de novo em alguns segundos.',
+          instanceFromPayload,
+        );
+        return NextResponse.json({ ok: true, intent: 'food_detailed_failed' });
+      }
+
+      // Salva a análise detalhada em `messages.ai_summary` se temos row
+      if (photoRowId) {
+        try {
+          const supabase = createServiceClient();
+          await supabase
+            .from('messages')
+            .update({ ai_summary: detalhada.text })
+            .eq('id', photoRowId);
+        } catch (e) {
+          logError('food_summary_save_detailed', e, { msgId: messageId });
+        }
+      }
+
+      await safeSend(remoteJid, detalhada.text, instanceFromPayload);
+      return NextResponse.json({ ok: true, intent: 'food_photo_detailed' });
+    }
+
+    // === MODO SILENCIOSO (padrão): só confirmação curta ===
+    if (!analise) {
+      await safeSend(
+        remoteJid,
+        '❌ Não consegui analisar essa foto. Tenta de novo com mais luz e o prato inteiro visível.',
+        instanceFromPayload,
+      );
+      return NextResponse.json({ ok: true, intent: 'food_photo_failed' });
+    }
+
+    const fmt = (n: number | null) => (n == null ? '?' : Math.round(n).toString());
+    const emoji = analise.meal_type === 'cafe' ? '☕' : analise.meal_type === 'almoco' ? '🍛' : analise.meal_type === 'jantar' ? '🍽️' : '🥪';
+    const tipo = analise.meal_type ?? inferirMealType(horaNum);
+    const itensTxt = analise.itens
+      .slice(0, 5)
+      .map((it) => `• ${it.nome}: ~${it.gramas}g`)
+      .join('\n');
+    const maisItens = analise.itens.length > 5 ? `\n• +${analise.itens.length - 5} itens` : '';
+    const confiancaTxt = (analise.confidence ?? 0) >= 0.8 ? '✅ alta' : (analise.confidence ?? 0) >= 0.5 ? '⚠️ média' : '❓ baixa';
+
+    const reply =
+      `${emoji} *${tipo} registrado*\n\n` +
+      `Itens:\n${itensTxt}${maisItens}\n\n` +
+      `Confiança: ${confiancaTxt}\n\n` +
+      `🔥 *Resumo do dia:*\n` +
+      `kcal: ${fmt(analise.kcal)} | prot: ${fmt(analise.protein_g)}g\n` +
+      `carb: ${fmt(analise.carb_g)}g | gord: ${fmt(analise.fat_g)}g\n\n` +
+      `_Quer análise completa tipo nutricionista? Responde "nutricionista" ou manda outra foto com esse texto na legenda._\n` +
+      `_Ajustou a porção? "foi 200g de arroz" ou "proteína era 40g" — corrijo na hora._`;
+
+    await safeSend(remoteJid, reply, instanceFromPayload);
+    return NextResponse.json({ ok: true, intent: 'food_photo_logged' });
   }
 
   // Re-lê texto após possível transcrição (audioMessage path pode ter

@@ -11,6 +11,7 @@ import {
   ScrollText,
   ListTodo,
   X,
+  Heart,
 } from 'lucide-react';
 import { LogoutButton } from '../_components/logout-button';
 import { cn } from '@/lib/utils';
@@ -141,6 +142,16 @@ export function Sidebar({ open, onClose, profile }: SidebarProps) {
           onClick={onClose}
         >
           Tarefas
+        </SidebarLink>
+
+        {/* Cuidados pessoais */}
+        <SidebarLink
+          href="/cuidados-pessoais"
+          icon={<Heart className="w-4 h-4" />}
+          active={pathname.startsWith('/cuidados-pessoais')}
+          onClick={onClose}
+        >
+          Cuidados pessoais
         </SidebarLink>
 
         {/* WhatsApp */}

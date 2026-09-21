@@ -5,6 +5,7 @@ import {
 } from '@/modules/tarefas/lib/lembretes';
 import { gerarRelatoriosDiarios } from '@/lib/financeiro/relatorio-diario';
 import { cleanupOldAudios } from '@/lib/audio-storage';
+import { cleanupOldFoodPhotos } from '@/lib/food-photo-storage';
 
 /**
  * Cron consolidado (#fix plano Hobby).
@@ -82,6 +83,8 @@ export async function GET(req: NextRequest) {
     if (bateuJanela(3, brazil)) {
       const r = await cleanupOldAudios(90);
       jobsDisparados.push(`cleanup_audios(arquivos=${r.arquivosApagados},rows=${r.rowsAtualizadas})`);
+      const r2 = await cleanupOldFoodPhotos(60);
+      jobsDisparados.push(`cleanup_food_photos(arquivos=${r2.arquivosApagados},rows=${r2.rowsAtualizadas})`);
     }
     if (bateuJanela(17, brazil)) {
       const r = await gerarRelatoriosDiarios('17h');

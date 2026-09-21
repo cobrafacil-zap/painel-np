@@ -13,6 +13,7 @@ import { AtalhosRapidos } from './_components/atalhos-rapidos';
 import { InstallPWAButton } from './_components/install-pwa-button';
 import { MetasLongas } from './_components/metas-longas';
 import { DicaSemana } from './_components/dica-semana';
+import { CuidadoPessoal } from './_components/cuidado-pessoal';
 import { PageHeader } from '../_components/page-header';
 import { getMetaDiaria, getGastoHoje } from '@/lib/financeiro/meta-diaria';
 
@@ -194,6 +195,12 @@ export default async function PainelPage() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-5">
         <MetasLongas />
         <DicaSemana />
+      </div>
+
+      {/* CUIDADO PESSOAL — alimentação/sono/treino (#feature alimentação) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-5">
+        <CuidadoPessoal />
+        {/* slot livre pra expansão futura (sono/treino como cards irmãos) */}
       </div>
     </div>
   );

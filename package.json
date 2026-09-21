@@ -11,6 +11,7 @@
     "setup:db": "node scripts/setup-db.mjs"
   },
   "dependencies": {
+    "@ai-sdk/google": "^1.2.22",
     "@ai-sdk/groq": "^1.0.0",
     "@supabase/ssr": "^0.5.2",
     "@supabase/supabase-js": "^2.45.4",
