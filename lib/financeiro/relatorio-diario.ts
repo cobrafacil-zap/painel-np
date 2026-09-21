@@ -16,6 +16,7 @@
 import { createServiceClient } from '@/lib/supabase/server';
 import { formatBRL, todayISO } from '@/lib/utils';
 import { getMetaDiaria, formatarIndicadorMeta } from './meta-diaria';
+import { listMetasLongas } from './metas-longas';
 import { gerarInsightCurto } from './insights';
 
 export type Slot = '17h' | '23h';
@@ -139,10 +140,23 @@ export async function gerarRelatoriosDiarios(slot: Slot): Promise<{
       if (ja && ja.length > 0) continue;
 
       const resumo = await calcularResumo(userId);
-      // Pula se não teve nenhuma atividade hoje
-      if (resumo.totalEntrou === 0 && resumo.totalSaiu === 0) continue;
-
       const meta = await getMetaDiaria(userId);
+      // Tem que checar meta longa também — relatório 23h faz sentido se
+      // user tem objetivo financeiro mesmo em dia sem gasto.
+      const metasLongas = slot === '23h' ? await listMetasLongas(userId) : [];
+
+      // Regra de envio:
+      //   17h → só se teve atividade (não incomoda à tarde sem necessidade)
+      //   23h → sempre que tiver meta diária OU meta longa configurada,
+      //          mesmo sem gasto no dia (vale como lembrete de saldo vs meta).
+      //          Sem nenhuma meta configurada, pula (não tem o que reportar).
+      const temAlgumaMeta =
+        (meta != null && meta > 0) || metasLongas.length > 0;
+      const temAtividade = resumo.totalEntrou > 0 || resumo.totalSaiu > 0;
+
+      if (slot === '17h' && !temAtividade) continue;
+      if (slot === '23h' && !temAtividade && !temAlgumaMeta) continue;
+
       const insightCurto = slot === '23h' ? await gerarInsightCurto(userId) : null;
       const messageText = formatarMensagem(slot, resumo, meta, insightCurto);
 

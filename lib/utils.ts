@@ -20,7 +20,17 @@ export function formatDateBR(iso: string): string {
 }
 
 export function todayISO(): string {
-  return new Date().toISOString().slice(0, 10);
+  // Retorna YYYY-MM-DD no fuso de São Paulo (America/Sao_Paulo, UTC-3).
+  // Evita o bug clássico de `toISOString().slice(0,10)` que sempre
+  // usa UTC — depois das 21h BRT já seria "amanhã" em UTC, fazendo
+  // o relatório das 23h pegar registros do dia errado.
+  const fmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  return fmt.format(new Date());
 }
 
 export function monthISO(date = new Date()): string {
