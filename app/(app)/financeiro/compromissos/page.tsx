@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { CheckCircle2, Plus, AlertTriangle, Calendar, X, Pencil } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { CheckCircle2, Plus, AlertTriangle, Calendar, X, Pencil, ChevronLeft, ChevronRight, CircleDot } from 'lucide-react';
 import { formatBRL, formatDateBR } from '@/lib/utils';
 
 type Parcela = {
@@ -30,6 +30,34 @@ type Compromisso = {
   parcelas?: Parcela[];
 };
 
+/** Helpers de mês no formato YYYY-MM (evita timezone issues usando strings) */
+const MESES_PT = [
+  'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+  'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro',
+];
+const MESES_PT_ABREV = MESES_PT.map((m) => m.slice(0, 3) + '.');
+
+function hojeYYYYMM(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function shiftMes(yyyymm: string, delta: number): string {
+  const [y, m] = yyyymm.split('-').map(Number);
+  const data = new Date(y, m - 1 + delta, 1);
+  return `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function formatMes(yyyymm: string, abrev: boolean): string {
+  const [y, m] = yyyymm.split('-').map(Number);
+  return `${abrev ? MESES_PT_ABREV[m - 1] : MESES_PT[m - 1]} ${y}`;
+}
+
+/** Devolve true se a data ISO (YYYY-MM-DD) cai no mês YYYY-MM */
+function dataEstaNoMes(dataIso: string, yyyymm: string): boolean {
+  return dataIso.startsWith(yyyymm);
+}
+
 export default function CompromissosPage() {
   const [compromissos, setCompromissos] = useState<Compromisso[]>([]);
   const [loading, setLoading] = useState(true);
@@ -38,6 +66,8 @@ export default function CompromissosPage() {
   const [editing, setEditing] = useState<Compromisso | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [filtro, setFiltro] = useState<'todos' | 'pagar' | 'receber'>('todos');
+  const [mesRef, setMesRef] = useState<string>(hojeYYYYMM());
+  const [mostrarTodos, setMostrarTodos] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -71,16 +101,75 @@ export default function CompromissosPage() {
     } else flash('⚠️ Erro ao apagar.');
   }
 
-  const filtrados = compromissos.filter((c) =>
-    filtro === 'todos' ? true : c.tipo === filtro
-  );
+  const filtrados = useMemo(() => {
+    let lista = compromissos;
+    // 1. Filtro por mês (só se NÃO for "todos")
+    if (!mostrarTodos) {
+      lista = lista.filter((c) => {
+        // Compromisso avulso: tem data_vencimento no mês
+        if (!c.parcelas || c.parcelas.length === 0) {
+          return c.data_vencimento ? dataEstaNoMes(c.data_vencimento, mesRef) : false;
+        }
+        // Compromisso parcelado: aparece se ALGUMA parcela cai no mês
+        return c.parcelas.some((p) => dataEstaNoMes(p.data_vencimento, mesRef));
+      });
+    }
+    // 2. Filtro por tipo (pagar/receber/todos)
+    if (filtro !== 'todos') {
+      lista = lista.filter((c) => c.tipo === filtro);
+    }
+    return lista;
+  }, [compromissos, filtro, mesRef, mostrarTodos]);
 
-  const totalPagar = compromissos
-    .filter((c) => c.tipo === 'pagar' && !c.pago)
-    .reduce((s, c) => s + Number(c.valor_total) - Number(c.valor_pago), 0);
-  const totalReceber = compromissos
-    .filter((c) => c.tipo === 'receber' && !c.pago)
-    .reduce((s, c) => s + Number(c.valor_total) - Number(c.valor_pago), 0);
+  const totalPagar = useMemo(() => {
+    let soma = 0;
+    for (const c of compromissos) {
+      if (c.tipo !== 'pagar' || c.pago) continue;
+      if (mostrarTodos) {
+        // soma o saldo devedor inteiro
+        soma += Number(c.valor_total) - Number(c.valor_pago);
+      } else {
+        // soma só parcelas que vencem no mês selecionado (ou avulso com data no mês)
+        if (!c.parcelas || c.parcelas.length === 0) {
+          if (c.data_vencimento && dataEstaNoMes(c.data_vencimento, mesRef)) {
+            soma += Number(c.valor_total) - Number(c.valor_pago);
+          }
+        } else {
+          for (const p of c.parcelas) {
+            if (!p.pago && dataEstaNoMes(p.data_vencimento, mesRef)) {
+              soma += Number(p.valor);
+            }
+          }
+        }
+      }
+    }
+    return soma;
+  }, [compromissos, mesRef, mostrarTodos]);
+
+  const totalReceber = useMemo(() => {
+    let soma = 0;
+    for (const c of compromissos) {
+      if (c.tipo !== 'receber' || c.pago) continue;
+      if (mostrarTodos) {
+        soma += Number(c.valor_total) - Number(c.valor_pago);
+      } else {
+        if (!c.parcelas || c.parcelas.length === 0) {
+          if (c.data_vencimento && dataEstaNoMes(c.data_vencimento, mesRef)) {
+            soma += Number(c.valor_total) - Number(c.valor_pago);
+          }
+        } else {
+          for (const p of c.parcelas) {
+            if (!p.pago && dataEstaNoMes(p.data_vencimento, mesRef)) {
+              soma += Number(p.valor);
+            }
+          }
+        }
+      }
+    }
+    return soma;
+  }, [compromissos, mesRef, mostrarTodos]);
+
+  const ehMesAtual = mesRef === hojeYYYYMM();
 
   return (
     <div className="space-y-6">
@@ -100,10 +189,68 @@ export default function CompromissosPage() {
         </button>
       </header>
 
+      {/* Seletor de mês */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center bg-bg-elevated rounded-lg border border-border overflow-hidden">
+          <button
+            onClick={() => { setMesRef((m) => shiftMes(m, -1)); setMostrarTodos(false); }}
+            className="p-2 hover:bg-bg-card text-zinc-400 hover:text-zinc-200"
+            title="Mês anterior"
+            aria-label="Mês anterior"
+          >
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+          <div className="px-3 py-1.5 min-w-[140px] text-center text-sm font-medium tabular-nums">
+            {mostrarTodos ? 'Todos os meses' : formatMes(mesRef, !ehMesAtual)}
+            {!mostrarTodos && ehMesAtual && (
+              <span className="ml-1.5 inline-flex items-center gap-1 text-[10px] uppercase tracking-wider text-emerald-400">
+                <CircleDot className="w-3 h-3" /> hoje
+              </span>
+            )}
+          </div>
+          <button
+            onClick={() => { setMesRef((m) => shiftMes(m, 1)); setMostrarTodos(false); }}
+            className="p-2 hover:bg-bg-card text-zinc-400 hover:text-zinc-200"
+            title="Mês seguinte"
+            aria-label="Mês seguinte"
+          >
+            <ChevronRight className="w-4 h-4" />
+          </button>
+        </div>
+
+        {!ehMesAtual && (
+          <button
+            onClick={() => { setMesRef(hojeYYYYMM()); setMostrarTodos(false); }}
+            className="px-3 py-1.5 rounded-lg text-xs bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25"
+          >
+            Hoje
+          </button>
+        )}
+
+        <button
+          onClick={() => setMostrarTodos((v) => !v)}
+          className={`px-3 py-1.5 rounded-lg text-xs ${
+            mostrarTodos
+              ? 'bg-emerald-500/20 text-emerald-300'
+              : 'bg-bg-elevated text-zinc-400 hover:text-zinc-200'
+          }`}
+        >
+          {mostrarTodos ? 'Todos ✓' : 'Todos os meses'}
+        </button>
+      </div>
+
       {/* Cards resumo */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <SummaryCard label="💸 A pagar" value={totalPagar} color="red" />
-        <SummaryCard label="💰 A receber" value={totalReceber} color="emerald" />
+        <SummaryCard
+          label={`💸 A pagar${mostrarTodos ? '' : ` — ${formatMes(mesRef, true)}`}`}
+          value={totalPagar}
+          color="red"
+        />
+        <SummaryCard
+          label={`💰 A receber${mostrarTodos ? '' : ` — ${formatMes(mesRef, true)}`}`}
+          value={totalReceber}
+          color="emerald"
+        />
         <SummaryCard
           label="📊 Saldo"
           value={totalReceber - totalPagar}
@@ -133,7 +280,13 @@ export default function CompromissosPage() {
           <p className="text-sm text-zinc-500">Carregando…</p>
         ) : filtrados.length === 0 ? (
           <div className="card p-8 text-center">
-            <p className="text-zinc-400">Nenhum compromisso {filtro !== 'todos' ? `do tipo "${filtro}"` : ''}.</p>
+            <p className="text-zinc-400">
+              Nenhum compromisso{' '}
+              {filtro !== 'todos' && `do tipo "${filtro}"`}
+              {!mostrarTodos && filtro === 'todos' && ` em ${formatMes(mesRef, false)}`}
+              {!mostrarTodos && filtro !== 'todos' && ` em ${formatMes(mesRef, false)}`}
+              .
+            </p>
             <p className="text-xs text-zinc-500 mt-2">Manda no WhatsApp ou clica em &ldquo;Novo compromisso&rdquo;.</p>
           </div>
         ) : (
@@ -144,6 +297,8 @@ export default function CompromissosPage() {
               onPagarParcela={pagarParcela}
               onDelete={() => deletar(c.id)}
               onEdit={() => setEditing(c)}
+              mesRef={mesRef}
+              mostrarTodos={mostrarTodos}
             />
           ))
         )}
@@ -196,16 +351,25 @@ function CompromissoCard({
   onPagarParcela,
   onDelete,
   onEdit,
+  mesRef,
+  mostrarTodos,
 }: {
   c: Compromisso;
   onPagarParcela: (id: string) => void;
   onDelete: () => void;
   onEdit: () => void;
+  mesRef: string;
+  mostrarTodos: boolean;
 }) {
   const restante = Number(c.valor_total) - Number(c.valor_pago);
   const isPagar = c.tipo === 'pagar';
   const cor = isPagar ? 'text-red-300' : 'text-emerald-300';
   const isParcelado = c.total_parcelas > 1;
+
+  // Quando filtrando por mês, mostra só as parcelas do mês
+  const parcelasVisiveis = c.parcelas?.filter((p) =>
+    mostrarTodos ? true : dataEstaNoMes(p.data_vencimento, mesRef)
+  ) ?? [];
 
   return (
     <div className={`card ${c.pago ? 'opacity-60' : ''}`}>
@@ -239,9 +403,14 @@ function CompromissoCard({
             {isParcelado && (
               <span>
                 • {c.parcela_atual - 1}/{c.total_parcelas} pagas
+                {!mostrarTodos && parcelasVisiveis.length > 0 && (
+                  <span className="ml-1 text-zinc-600">
+                    ({parcelasVisiveis.length} no mês)
+                  </span>
+                )}
               </span>
             )}
-            {c.data_vencimento && (
+            {c.data_vencimento && !isParcelado && (
               <span>• vence {formatDateBR(c.data_vencimento)}</span>
             )}
           </div>
@@ -265,10 +434,10 @@ function CompromissoCard({
         </div>
       </div>
 
-      {/* Lista de parcelas (se parcelado) */}
-      {isParcelado && c.parcelas && (
+      {/* Lista de parcelas (se parcelado) — mostra só as do mês visível */}
+      {isParcelado && parcelasVisiveis.length > 0 && (
         <div className="mt-4 space-y-1.5">
-          {c.parcelas.map((p) => (
+          {parcelasVisiveis.map((p) => (
             <ParcelaRow key={p.id} p={p} totalParcelas={c.total_parcelas} onPagar={() => onPagarParcela(p.id)} />
           ))}
         </div>
