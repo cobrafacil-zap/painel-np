@@ -15,12 +15,14 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import {
   TrendingUp,
   Sparkles,
   ChevronDown,
   ChevronUp,
   RotateCcw,
+  ExternalLink,
   Calendar,
   Wallet,
   PiggyBank,
@@ -37,7 +39,7 @@ import {
   type Deposito,
 } from '@/lib/financeiro/renda-passiva';
 
-const STORAGE_KEY = 'painel-np:renda-passiva:v2';
+const STORAGE_KEY = 'painel-np:renda-passiva:v3';
 
 interface EstadoSalvo {
   rendaAlvo: number;
@@ -129,8 +131,8 @@ export default function RendaPassivaPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const gastosFixos = resumo?.gastos_fixos_estimado ?? 0;
-  const sobrinhaCalculada = Math.max(0, estado.receitaMensal - gastosFixos);
+  const gastosFixosAuto = resumo?.gastos_fixos_estimado ?? 0;
+  const sobrinhaCalculada = Math.max(0, estado.receitaMensal - gastosFixosAuto);
   const aporteSugerido = useMemo(
     () => Math.round(sobrinhaCalculada * (estado.pctRecomendado / 100) * 100) / 100,
     [sobrinhaCalculada, estado.pctRecomendado],
@@ -226,19 +228,55 @@ export default function RendaPassivaPage() {
 
           <div>
             <label className="block text-xs">
-              <span className="text-zinc-400">Gastos fixos (detectados)</span>
+              <span className="text-zinc-400 flex items-center gap-1.5">
+                Gastos fixos mensais
+                {gastosFixosAuto > 0 && (
+                  <span className="text-[9px] uppercase tracking-wide bg-emerald-500/15 text-emerald-300 border border-emerald-500/20 px-1 py-0.5 rounded">
+                    auto
+                  </span>
+                )}
+              </span>
               <div className="flex items-center gap-1 mt-1">
                 <span className="text-sm text-zinc-500">R$</span>
-                <input
-                  type="text"
-                  value={resumo?.gastos_fixos_estimado ? formatBRL(resumo.gastos_fixos_estimado) : '—'}
-                  disabled
-                  className="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-sm num-tabular text-zinc-500"
-                />
+                <p className="flex-1 text-lg font-semibold num-tabular text-zinc-100">
+                  {gastosFixosAuto > 0 ? formatBRL(gastosFixosAuto) : '—'}
+                </p>
+                <Link
+                  href="/financeiro/compromissos"
+                  className="shrink-0 text-[10px] text-zinc-400 hover:text-zinc-200 flex items-center gap-1"
+                  title="Cadastrar/editar em Compromissos"
+                >
+                  editar
+                  <ExternalLink className="w-3 h-3" />
+                </Link>
               </div>
               <p className="text-[10px] text-zinc-600 mt-1">
-                {resumo?.compromissos_ativos ?? 0} compromisso(s) ativo(s) — vem dos
-                cadastrados em Compromissos.
+                {resumo?.compromissos_ativos ? (
+                  <>
+                    De {resumo.compromissos_ativos} compromisso
+                    {resumo.compromissos_ativos !== 1 ? 's' : ''} ativo
+                    {resumo.compromissos_ativos !== 1 ? 's' : ''} (tipo &ldquo;pagar&rdquo;,
+                    com recorrência). Cadastre em{' '}
+                    <Link
+                      href="/financeiro/compromissos"
+                      className="text-zinc-400 hover:text-zinc-200 underline"
+                    >
+                      Compromissos
+                    </Link>{' '}
+                    se quiser adicionar mais.
+                  </>
+                ) : (
+                  <>
+                    Sem compromissos cadastrados. Cadastre em{' '}
+                    <Link
+                      href="/financeiro/compromissos"
+                      className="text-zinc-400 hover:text-zinc-200 underline"
+                    >
+                      Compromissos
+                    </Link>{' '}
+                    pra alimentar essa conta.
+                  </>
+                )}
               </p>
             </label>
           </div>
