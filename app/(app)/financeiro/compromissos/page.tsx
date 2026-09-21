@@ -202,11 +202,6 @@ export default function CompromissosPage() {
           </button>
           <div className="px-3 py-1.5 min-w-[140px] text-center text-sm font-medium tabular-nums">
             {mostrarTodos ? 'Todos os meses' : formatMes(mesRef, !ehMesAtual)}
-            {!mostrarTodos && ehMesAtual && (
-              <span className="ml-1.5 inline-flex items-center gap-1 text-[10px] uppercase tracking-wider text-emerald-400">
-                <CircleDot className="w-3 h-3" /> hoje
-              </span>
-            )}
           </div>
           <button
             onClick={() => { setMesRef((m) => shiftMes(m, 1)); setMostrarTodos(false); }}

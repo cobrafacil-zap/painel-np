@@ -47,6 +47,10 @@ export function calcularMetaReserva(gastosFixosMensal: number): number {
   return Math.round(gastosFixosMensal * MULTIPLICADOR_MESES * 100) / 100;
 }
 
+/** Taxa mensal ~100% CDI usada pra projetar rendimento da reserva já completa */
+export const TAXA_MENSAL_CDI = 0.004; // 0.4%/mês ≈ 4.88% a.a. (Selic out/2026)
+
+
 export interface ProgressoReserva {
   meta: number;
   total_depositado: number;
@@ -56,8 +60,16 @@ export interface ProgressoReserva {
   completa: boolean;
   /** quanto falta pra bater a meta (0 se já bateu) */
   falta: number;
-  /** quantos meses faltam se mantiver o aporte mensal (Infinity se aporte=0) */
+  /** quantos meses faltam se mantiver o aporte mensal (null se aporte=0 ou completa) */
   meses_estimados: number | null;
+  /** "construindo" | "rendendo" — fase atual da reserva */
+  fase: 'construindo' | 'rendendo';
+  /** projeção de rendimento mensal se reserva estivesse rendendo 100% CDI */
+  rendimento_mensal_estimado: number;
+  /** quantos anos inteiros faltam (null se meses_estimados=null) */
+  anos_estimados: number | null;
+  /** meses restantes depois dos anos inteiros (null se meses_estimados=null) */
+  meses_restantes: number | null;
 }
 
 /** Calcula o progresso de um user */
@@ -73,6 +85,10 @@ export function calcularProgresso(
     aporteMensalDesejado > 0 && falta > 0
       ? Math.ceil(falta / aporteMensalDesejado)
       : null;
+  const anosEstimados =
+    mesesEstimados != null ? Math.floor(mesesEstimados / 12) : null;
+  const mesesRestantes =
+    mesesEstimados != null ? mesesEstimados % 12 : null;
 
   return {
     meta,
@@ -81,6 +97,11 @@ export function calcularProgresso(
     completa: pct >= 1.0,
     falta: Math.round(falta * 100) / 100,
     meses_estimados: mesesEstimados,
+    fase: pct >= 1.0 ? 'rendendo' : 'construindo',
+    rendimento_mensal_estimado:
+      Math.round(totalDepositado * TAXA_MENSAL_CDI * 100) / 100,
+    anos_estimados: anosEstimados,
+    meses_restantes: mesesRestantes,
   };
 }
 

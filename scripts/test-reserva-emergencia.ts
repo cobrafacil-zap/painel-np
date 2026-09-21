@@ -192,6 +192,61 @@ assertEq(pAporteZero.meses_estimados, null, 'meses_estimados = null quando aport
 const pRound = calcularProgresso(1600, 1234.567);
 assertEq(pRound.total_depositado, 1234.57, 'total_depositado arredondado 2 casas');
 
+console.log('\n--- calcularProgresso: fase + rendimento ---');
+
+// Fase "construindo" enquanto progresso_pct < 1.0
+const pBuild = calcularProgresso(1600, 2400);
+assertEq(pBuild.fase, 'construindo', 'fase = construindo quando progresso < 100%');
+assertClose(
+  pBuild.rendimento_mensal_estimado,
+  Math.round(2400 * 0.004 * 100) / 100,
+  0.01,
+  'rendimento_mensal_estimado = totalDepositado × 0.4%',
+);
+
+// Fase "rendendo" quando progresso_pct >= 1.0
+const pRend = calcularProgresso(1600, 9600);
+assertEq(pRend.fase, 'rendendo', 'fase = rendendo quando progresso >= 100%');
+assertClose(pRend.rendimento_mensal_estimado, 38.4, 0.01, 'rendimento_mensal_estimado = 9600 × 0.4% = 38.40');
+
+// Reserva zerada → rendimento 0
+const pZero = calcularProgresso(1600, 0);
+assertEq(pZero.rendimento_mensal_estimado, 0, 'rendimento = 0 quando total = 0');
+
+console.log('\n--- calcularProgresso: anos/meses_restantes ---');
+
+// 24 meses = 2 anos, 0 meses restantes
+const p24m = calcularProgresso(1600, 0, 400); // falta 9600, aporte 400 → 24 meses
+assertEq(p24m.meses_estimados, 24, 'meses_estimados = 24');
+assertEq(p24m.anos_estimados, 2, 'anos_estimados = 2 quando 24 meses');
+assertEq(p24m.meses_restantes, 0, 'meses_restantes = 0 quando múltiplo de 12');
+
+// 25 meses = 2 anos, 1 mês restante
+const p25m = calcularProgresso(1600, 0, 384); // falta 9600, aporte 384 → ceil(25) = 25
+assertEq(p25m.meses_estimados, 25, 'meses_estimados = 25');
+assertEq(p25m.anos_estimados, 2, 'anos_estimados = 2 quando 25 meses');
+assertEq(p25m.meses_restantes, 1, 'meses_restantes = 1 quando 25 meses');
+
+// 12 meses = 1 ano, 0 meses restantes
+const p12m = calcularProgresso(1600, 0, 800); // falta 9600, aporte 800 → ceil(12) = 12
+assertEq(p12m.anos_estimados, 1, 'anos_estimados = 1 quando 12 meses');
+assertEq(p12m.meses_restantes, 0, 'meses_restantes = 0');
+
+// 7 meses = 0 anos, 7 meses restantes
+const p7m = calcularProgresso(1600, 0, 1400); // falta 9600, aporte 1400 → ceil(6.86) = 7
+assertEq(p7m.anos_estimados, 0, 'anos_estimados = 0 quando < 12 meses');
+assertEq(p7m.meses_restantes, 7, 'meses_restantes = 7');
+
+// Sem aporte → tudo null
+const pNoAporte = calcularProgresso(1600, 0, 0);
+assertEq(pNoAporte.anos_estimados, null, 'anos_estimados = null sem aporte');
+assertEq(pNoAporte.meses_restantes, null, 'meses_restantes = null sem aporte');
+
+// Reserva completa → null (já não precisa de meses)
+const pDone = calcularProgresso(1600, 9600, 500);
+assertEq(pDone.anos_estimados, null, 'anos_estimados = null quando completa');
+assertEq(pDone.meses_restantes, null, 'meses_restantes = null quando completa');
+
 console.log(`\n--- Resultado ---`);
 console.log(`Passou: ${passed} | Falhou: ${failed}`);
 if (failed > 0) process.exit(1);

@@ -9,9 +9,12 @@
  *
  * Sugestões textuais de onde guardar (sem número mágico):
  *   - Tesouro Selic, CDB liquidez diária, Conta remunerada.
+ *
+ * Projeção de tempo baseada em 'posso guardar X/mês' (input manual,
+ * auto-preenchido com sobrinha só no primeiro load).
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -23,9 +26,21 @@ import {
   ExternalLink,
   ArrowRight,
   TrendingUp,
+  Calendar,
+  Sparkles,
 } from 'lucide-react';
 import { formatBRL, formatDateBR } from '@/lib/utils';
-import { ONDE_GUARDAR_SUGESTOES } from '@/lib/financeiro/reserva-emergencia';
+import {
+  ONDE_GUARDAR_SUGESTOES,
+  calcularProgresso,
+  TAXA_MENSAL_CDI,
+} from '@/lib/financeiro/reserva-emergencia';
+
+const STORAGE_KEY = 'painel-np:reserva-emergencia:v1';
+
+interface EstadoSalvo {
+  aporteMensal: number; // quanto o user pode guardar por mês (0 = sem input)
+}
 
 interface ResumoAPI {
   gastos_fixos_mensal: number;
@@ -34,6 +49,10 @@ interface ResumoAPI {
   progresso_pct: number;
   completa: boolean;
   falta: number;
+  fase: 'construindo' | 'rendendo';
+  rendimento_mensal_estimado: number;
+  receita_media_3m: number;
+  sobrinha_estimada: number;
   compromissos_ativos: number;
   depositos_recentes: DepositoReserva[];
 }
@@ -54,6 +73,9 @@ export function AbaReservaEmergencia() {
   const [saving, setSaving] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [removendoId, setRemovendoId] = useState<string | null>(null);
+  // ref pra saber se é o primeiro carregamento (auto-popular aporte só na primeira vez)
+  const primeiroLoad = useRef(true);
+  const [aporteMensal, setAporteMensal] = useState<number>(0);
 
   async function load() {
     try {
@@ -64,6 +86,54 @@ export function AbaReservaEmergencia() {
       setLoading(false);
     }
   }
+
+  // Hidrata aporteMensal do localStorage na primeira vez
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as EstadoSalvo;
+        if (typeof parsed.aporteMensal === 'number') {
+          setAporteMensal(parsed.aporteMensal);
+          primeiroLoad.current = false;
+        }
+      }
+    } catch {
+      // ignore parse error
+    }
+  }, []);
+
+  // Auto-popula aporteMensal com sobrinha só no primeiro load (se user não tem valor salvo)
+  useEffect(() => {
+    if (primeiroLoad.current && resumo && resumo.sobrinha_estimada > 0) {
+      primeiroLoad.current = false;
+      setAporteMensal((atual) => (atual > 0 ? atual : resumo.sobrinha_estimada));
+    }
+  }, [resumo]);
+
+  // Persiste aporteMensal em localStorage em qualquer mudança
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({ aporteMensal } satisfies EstadoSalvo),
+      );
+    } catch {
+      // ignore quota error
+    }
+  }, [aporteMensal]);
+
+  // Recalcula projeção derivada da reserva (mesma lógica do backend)
+  const projecao = useMemo(() => {
+    if (!resumo) return null;
+    return calcularProgresso(
+      resumo.gastos_fixos_mensal,
+      resumo.total_depositado,
+      aporteMensal,
+    );
+  }, [resumo, aporteMensal]);
 
   useEffect(() => {
     load();
@@ -273,6 +343,116 @@ export function AbaReservaEmergencia() {
 
         {erro && (
           <p className="mt-2 text-xs text-red-300">❌ {erro}</p>
+        )}
+      </section>
+
+      {/* Card: posso guardar por mês + projeção */}
+      <section className="glass-elevated rounded-xl p-5">
+        <header className="flex items-center gap-2 mb-3">
+          <Calendar className="w-4 h-4 text-emerald-300" />
+          <p className="label-eyebrow">Projeção</p>
+        </header>
+
+        <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 items-end mb-4">
+          <label className="block">
+            <span className="block text-[10px] text-zinc-500 uppercase tracking-wide mb-1">
+              Posso guardar por mês (R$)
+            </span>
+            <input
+              type="number"
+              inputMode="decimal"
+              step="0.01"
+              min="0"
+              value={aporteMensal > 0 ? aporteMensal : ''}
+              onChange={(e) => {
+                const v = e.target.value;
+                setAporteMensal(v === '' ? 0 : Number(v));
+              }}
+              placeholder={
+                resumo.sobrinha_estimada > 0
+                  ? `auto-preenchido com ${formatBRL(resumo.sobrinha_estimada)}`
+                  : 'ex: 500.00'
+              }
+              className="w-full bg-white/[0.04] border border-white/[0.06] rounded px-3 py-2 text-sm num-tabular focus:outline-none focus:border-emerald-400/40"
+            />
+            {resumo.sobrinha_estimada > 0 && (
+              <span className="block text-[10px] text-zinc-500 mt-1">
+                💡 Sugestão: sua sobrinha estimada é{' '}
+                <span className="text-emerald-300">
+                  {formatBRL(resumo.sobrinha_estimada)}
+                </span>{' '}
+                (receita {formatBRL(resumo.receita_media_3m)} − gastos{' '}
+                {formatBRL(resumo.gastos_fixos_mensal)})
+              </span>
+            )}
+          </label>
+        </div>
+
+        {/* Resultado da projeção */}
+        {projecao && (
+          <div className="rounded-lg bg-white/[0.03] border border-white/[0.06] p-4">
+            {projecao.fase === 'rendendo' ? (
+              <div className="flex items-start gap-3">
+                <div className="w-9 h-9 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center shrink-0">
+                  <Sparkles className="w-4 h-4 text-emerald-300" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-emerald-200">
+                    Fase 2: reserva rendendo ~{formatBRL(projecao.rendimento_mensal_estimado)}/mês
+                  </p>
+                  <p className="text-xs text-zinc-400 mt-1 leading-relaxed">
+                    A reserva está rendendo ~{(TAXA_MENSAL_CDI * 100).toFixed(2)}%/mês
+                    (~100% CDI). Agora o foco é manter e investir o excedente.
+                  </p>
+                </div>
+              </div>
+            ) : projecao.meses_estimados != null ? (
+              <div className="flex items-start gap-3">
+                <div className="w-9 h-9 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shrink-0">
+                  <TrendingUp className="w-4 h-4 text-amber-300" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-amber-200">
+                    Fase 1: construindo —{' '}
+                    {projecao.anos_estimados != null && projecao.anos_estimados > 0
+                      ? `${projecao.anos_estimados} ${projecao.anos_estimados === 1 ? 'ano' : 'anos'}`
+                      : ''}
+                    {projecao.anos_estimados != null &&
+                      projecao.anos_estimados > 0 &&
+                      projecao.meses_restantes != null &&
+                      projecao.meses_restantes > 0 &&
+                      ' e '}
+                    {projecao.meses_restantes != null && projecao.meses_restantes > 0
+                      ? `${projecao.meses_restantes} ${projecao.meses_restantes === 1 ? 'mês' : 'meses'}`
+                      : ''}
+                  </p>
+                  <p className="text-xs text-zinc-400 mt-1 leading-relaxed">
+                    Guardando {formatBRL(aporteMensal)}/mês → reserva completa em{' '}
+                    <span className="text-zinc-100 font-medium">
+                      {projecao.meses_estimados}{' '}
+                      {projecao.meses_estimados === 1 ? 'mês' : 'meses'}
+                    </span>
+                    . Faltam {formatBRL(projecao.falta)}.
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-start gap-3">
+                <div className="w-9 h-9 rounded-lg bg-zinc-500/10 border border-zinc-500/20 flex items-center justify-center shrink-0">
+                  <TrendingUp className="w-4 h-4 text-zinc-400" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-zinc-200">
+                    Sem projeção ainda
+                  </p>
+                  <p className="text-xs text-zinc-400 mt-1 leading-relaxed">
+                    Informe quanto consegue guardar por mês pra ver em quanto tempo
+                    bate a meta.
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
         )}
       </section>
 
