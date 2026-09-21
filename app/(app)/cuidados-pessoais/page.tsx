@@ -14,11 +14,11 @@
  */
 
 import { createClient } from '@/lib/supabase/server';
-import { Heart, Moon, Dumbbell } from 'lucide-react';
+import { Heart } from 'lucide-react';
 import { BioForm } from './_components/bio-form';
 import { AlimentacaoSecao } from './_components/alimentacao-secao';
 import { HistoricoRefeicoes } from './_components/historico-refeicoes';
-import { SecaoPlaceholder } from './_components/secao-placeholder';
+import { SecoesPlaceholder } from './_components/secoes-placeholder';
 import { PageHeader } from '../_components/page-header';
 
 export const dynamic = 'force-dynamic';
@@ -67,19 +67,7 @@ export default async function CuidadosPessoaisPage() {
         <HistoricoRefeicoes />
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-        {/* Placeholders — em breve */}
-        <SecaoPlaceholder
-          icon={Moon}
-          titulo="Sono"
-          descricao="Registrar horas dormidas, qualidade percebida e consistência. Liberação prevista pra próxima fase."
-        />
-        <SecaoPlaceholder
-          icon={Dumbbell}
-          titulo="Treino"
-          descricao="Cadastrar atividades físicas (musculação, cardio, esporte) com duração e sensação de esforço. Liberação prevista pra próxima fase."
-        />
-      </div>
+      <SecoesPlaceholder />
     </div>
   );
 }
