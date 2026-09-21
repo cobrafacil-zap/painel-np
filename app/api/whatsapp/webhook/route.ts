@@ -687,10 +687,28 @@ export async function POST(req: NextRequest) {
     // Detector de "pergunta sobre mim": cai aqui quando o user manda
     // coisas como "o que você faz", "quem é você", "ajuda", "menu".
     // Antes do fallthrough genérico.
-    const textoNorm = texto.trim().toLowerCase();
+    //
+    // Normaliza agressivamente pra cobrir grafias comuns:
+    //   - acentos (é→e, ç→c)
+    //   - espaços entre palavras (Oque = O que)
+    //   - pontuação final (?, !, .)
+    // Sem isso, "Oque você faz?" escapava do regex.
+    const textoNorm = texto
+      .trim()
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[̀-ͯ]/g, '') // tira diacríticos
+      .replace(/[?!.]/g, '')
+      .trim();
+    // Recolapsa palavras compostas conhecidas (Oque→O que, Vc→Você, Voca→Voce)
+    const textoCola = textoNorm
+      .replace(/\boque\b/g, 'o que')
+      .replace(/\bvc\b/g, 'voce')
+      .replace(/\bvoca\b/g, 'voce')
+      .replace(/\bvoce\b/g, 'voce');
     const ehPerguntaSobreBot =
-      /^\s*(o\s+que\s+(você|vc|voce)\s+(faz|sabe|consegue|pode)\s+fazer|quem\s+(é|e)\s+você|ajuda|help|menu|comandos?|o\s+que\s+(você|vc)\s+é|para\s+que\s+(você|vc)\s+serv|quais?\s+(coisas?|comandos?)\s+(você|vc)\s+(faz|sabe))\s*[?.!]?\s*$/i.test(
-        textoNorm,
+      /\b(o\s+que\s+(voce|vc)\s+(faz|sabe|consegue|pode|faz\??)|quem\s+(e|a)\s+(voce|vc)|ajuda|help|menu|comandos?|o\s+que\s+(voce|vc)\s+e|para\s+que\s+(voce|vc)\s+serv|quais?\s+(coisas?|comandos?)\s+(voce|vc)\s+(faz|sabe)|como\s+(funciona|usar|uso)|oq\s+(vc|voce)\s+faz)\b/i.test(
+        textoCola,
       );
 
     if (ehPerguntaSobreBot) {
