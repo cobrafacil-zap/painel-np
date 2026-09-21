@@ -67,7 +67,11 @@ interface ResumoAPI {
   compromissos_ativos: number;
 }
 
-export default function RendaPassivaPage() {
+export default function RendaPassivaPage({
+  mostrarVoltar = true,
+}: {
+  mostrarVoltar?: boolean;
+} = {}) {
   const router = useRouter();
   const [estado, setEstado] = useState<EstadoSalvo>(ESTADO_DEFAULT);
   const [resumo, setResumo] = useState<ResumoAPI | null>(null);
@@ -171,13 +175,15 @@ export default function RendaPassivaPage() {
       {/* Header */}
       <header className="flex items-start justify-between gap-3 flex-wrap">
         <div className="min-w-0">
-          <button
-            type="button"
-            onClick={() => router.push('/financeiro')}
-            className="text-xs text-zinc-500 hover:text-zinc-300 mb-2 inline-block"
-          >
-            ← voltar
-          </button>
+          {mostrarVoltar && (
+            <button
+              type="button"
+              onClick={() => router.push('/financeiro')}
+              className="text-xs text-zinc-500 hover:text-zinc-300 mb-2 inline-block"
+            >
+              ← voltar
+            </button>
+          )}
           <p className="label-eyebrow">Planejamento</p>
           <h1 className="text-xl sm:text-2xl md:text-3xl font-extrabold tracking-tight mt-1 break-words">
             Quanto preciso pra parar de trabalhar?
