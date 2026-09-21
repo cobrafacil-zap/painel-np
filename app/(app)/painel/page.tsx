@@ -11,6 +11,8 @@ import { PadroesPrevistos } from './_components/padroes-previstos';
 import { MetasMes } from './_components/metas-mes';
 import { AtalhosRapidos } from './_components/atalhos-rapidos';
 import { InstallPWAButton } from './_components/install-pwa-button';
+import { MetasLongas } from './_components/metas-longas';
+import { DicaSemana } from './_components/dica-semana';
 import { PageHeader } from '../_components/page-header';
 import { getMetaDiaria, getGastoHoje } from '@/lib/financeiro/meta-diaria';
 
@@ -186,6 +188,12 @@ export default async function PainelPage() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-5">
         <PadroesPrevistos />
         <MetasMes />
+      </div>
+
+      {/* METAS LONGAS + DICAS (#overhaul metas-largas) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-5">
+        <MetasLongas />
+        <DicaSemana />
       </div>
     </div>
   );

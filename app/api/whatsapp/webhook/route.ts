@@ -26,6 +26,7 @@ import { detectarDuplicata, formatarMensagemDuplicata } from '@/lib/financeiro/d
 import { extrairEntidades } from '@/lib/nlp/entities';
 import { getOrCompute as parserCacheGetOrCompute } from '@/lib/parser-cache';
 import { autoCategorize } from '@/lib/financeiro/categorias';
+import { upsertMetaLonga, listMetasLongas, atualizarValorGuardado, simularMetaLonga } from '@/lib/financeiro/metas-longas';
 import { logStage, logError } from '@/lib/log';
 import { recordParserStage } from '@/lib/parser-stats';
 import {
@@ -684,6 +685,65 @@ export async function POST(req: NextRequest) {
   }
 
   if (parsed.intent === 'outro' || parsed.confidence < 0.75) {
+    // Detector de meta longa (#overhaul metas-largas): frases tipo
+    // "quero juntar 100k em 5 anos" caem aqui antes de cair no
+    // fallthrough. Regex próprio pra evitar custo de LLM extra.
+    const metaLongaParsed = parseFraseMetaLonga(texto);
+    if (metaLongaParsed) {
+      try {
+        const meta = await upsertMetaLonga({
+          userId,
+          nome: metaLongaParsed.nome,
+          valorAlvo: metaLongaParsed.valor,
+          prazoMeses: metaLongaParsed.prazo_meses,
+        });
+        if (meta) {
+          const sim = simularMetaLonga(metaLongaParsed.valor, metaLongaParsed.prazo_meses);
+          await safeSend(
+            remoteJid,
+            `🎯 *Meta "${metaLongaParsed.nome}" criada!*\n\n` +
+              `💰 Alvo: ${formatBRL(metaLongaParsed.valor)}\n` +
+              `📅 Prazo: ${metaLongaParsed.prazo_meses} meses (${(metaLongaParsed.prazo_meses / 12).toFixed(1)} anos)\n` +
+              `📈 Pra bater no prazo: guardar ${formatBRL(sim.parcela_mensal)}/mês\n\n` +
+              `💡 Pra atualizar quanto já guardou: fala "já juntei X" ou "atualiza meta Y pra X".`,
+            instanceFromPayload,
+          );
+          return NextResponse.json({ ok: true, intent: 'meta_longa_set' });
+        }
+      } catch (e) {
+        logError('meta_longa_set', e, { texto });
+      }
+    }
+
+    // Detector de atualização de valor guardado (#overhaul metas-largas):
+    // frases tipo "já juntei 30k pra casa" ou "atualiza meta Y pra X".
+    const atualizacaoValor = parseAtualizacaoValorGuardado(texto);
+    if (atualizacaoValor) {
+      try {
+        const metas = await listMetasLongas(userId);
+        if (metas.length > 0) {
+          // Pega a meta mais recente se user não especificou nome
+          const alvo = atualizacaoValor.nome
+            ? metas.find((m) => m.nome.toLowerCase().includes(atualizacaoValor.nome!.toLowerCase()))
+            : metas[0];
+          if (alvo) {
+            const ok = await atualizarValorGuardado(alvo.id, atualizacaoValor.valor);
+            if (ok) {
+              const novoPct = (atualizacaoValor.valor / Number(alvo.valor_alvo)) * 100;
+              await safeSend(
+                remoteJid,
+                `✅ Atualizei "${alvo.nome}": agora você tem ${formatBRL(atualizacaoValor.valor)} (${novoPct.toFixed(0)}% da meta).`,
+                instanceFromPayload,
+              );
+              return NextResponse.json({ ok: true, intent: 'meta_longa_update' });
+            }
+          }
+        }
+      } catch (e) {
+        logError('meta_longa_update', e, { texto });
+      }
+    }
+
     // Detector de "pergunta sobre mim": cai aqui quando o user manda
     // coisas como "o que você faz", "quem é você", "ajuda", "menu".
     // Antes do fallthrough genérico.
@@ -1212,4 +1272,151 @@ function ehFraseMetaDiaria(texto: string): boolean {
     /\b(di[áa]ri[ao]|diariamente|por\s+dia|de\s+dia|do\s+dia)\b/.test(t);
   // Combinação obrigatória: meta + diário (em qualquer ordem).
   return temMeta && temDiario;
+}
+
+/**
+ * Detecta frases de meta longa tipo "quero juntar 100k em 5 anos".
+ * Retorna `{ valor, prazo_meses, nome }` ou null se não detectar.
+ *
+ * Convenção:
+ *   - valor: número puro (ex: 100000 pra "100k", 50000 pra "50 mil")
+ *   - prazo_meses: sempre em meses (1 ano = 12)
+ *   - nome: nome curto gerado automaticamente se user não deu explícito
+ *
+ * Cobre:
+ *   "quero juntar 100k em 5 anos"      → {valor: 100000, prazo: 60, nome: "Juntar 100k"}
+ *   "juntar 100 mil em 2 anos"         → idem
+ *   "meta de 50k pra casa em 3 anos"   → idem, nome: "50k pra casa"
+ *   "trocar carro em 2 anos"           → sem valor; usa default de 30k
+ *   "guardar 10k em 12 meses"          → {valor: 10000, prazo: 12}
+ *   "viajar em 1 ano"                  → sem valor; usa default 8k
+ */
+function parseFraseMetaLonga(texto: string): {
+  valor: number;
+  prazo_meses: number;
+  nome: string;
+} | null {
+  const t = normalizarAcentos(texto.toLowerCase()).trim();
+
+  // Precisa ter algum verbo de objetivo + marcador temporal.
+  const temObjetivo = /\b(juntar|guardar|economizar|ter|fazer|alcancar|atingir|comprar|trocar|viajar|casar|aposentar|sobreviver|ter\s+\w+|montar)\b/.test(t);
+  const temTemporal = /\b(em\s+\d+\s+(ano|anos|mes|meses)|daqui\s+a\s+\d+\s+(ano|anos|mes|meses)|pra\s+\d+\s+(ano|anos|mes|meses)|ate\s+\d+\s+(ano|anos|mes|meses)|ate\s+o\s+ano\s+que\s+vem|ano\s+que\s+vem|proximo\s+ano)\b/.test(t);
+  // Tem que ter um OU outro pra ser meta longa (não só frase genérica).
+  if (!temObjetivo && !temTemporal) return null;
+
+  // Extrai valor
+  // Padrões: "100k", "100 mil", "100.000", "R$ 100000", "100 reais".
+  // IMPORTANTE: "mil" sozinho (sem "milhao") = 1000. "k" = 1000.
+  // "M" maiúsculo ou "milhao"/"milhoes" = 1M. "m" minúsculo solto = ambíguo,
+  // não casa pra evitar falso positivo em palavras como "meses".
+  let valor = 0;
+  const valorMatch =
+    t.match(/\b(\d+(?:[.,]\d+)?)\s*(?:k|mil)\b/i) ||
+    t.match(/\b(\d+(?:[.,]\d+)?)\s*(?:M|milhao|milhoes)\b/) ||
+    t.match(/r?\$?\s*(\d{1,3}(?:[.,]\d{3})+|\d{4,})/) ||
+    t.match(/\b(\d+)\s*reais?\b/);
+  if (valorMatch) {
+    let n = parseFloat(valorMatch[1].replace(',', '.'));
+    const sufixo = valorMatch[0].toLowerCase();
+    if (sufixo.includes('k') || /\bmil\b/.test(sufixo)) n *= 1_000;
+    else if (sufixo.includes('milhao') || sufixo.includes('m')) n *= 1_000_000;
+    valor = Math.round(n);
+  }
+
+  // Extrai prazo
+  let prazoMeses = 0;
+  const prazoMatch = t.match(
+    /\b(?:em|daqui\s+a|pra|ate)\s+(\d+)\s+(ano|anos|mes|meses)\b/,
+  );
+  if (prazoMatch) {
+    const n = parseInt(prazoMatch[1], 10);
+    prazoMeses = prazoMatch[2].startsWith('ano') ? n * 12 : n;
+  } else if (/ano\s+que\s+vem|proximo\s+ano/.test(t)) {
+    prazoMeses = 12;
+  }
+
+  // Tem que ter pelo menos 1 dos 2 (valor ou prazo) E ter detectado
+  // uma frase de objetivo. Se nada, não é meta longa.
+  if (valor === 0 && prazoMeses === 0) return null;
+
+  // Default de valor se user só deu prazo (ex: "trocar carro em 2 anos")
+  if (valor === 0) valor = 30_000; // fallback razoável
+
+  // Default de prazo se user só deu valor (ex: "quero juntar 100k")
+  if (prazoMeses === 0) prazoMeses = 24; // 2 anos
+
+  // Gera nome descritivo baseado no verbo + complemento
+  let nome = '';
+  const verboUsado =
+    t.match(/\b(juntar|guardar|economizar|comprar|trocar|viajar|montar|casar|aposentar)\b/)?.[1] ?? null;
+  const nomeMatch = t.match(
+    /\b(?:pra|para|de)\s+([a-záéíóúâêôãõç\s]{3,30}?)(?:\s+em|\s+daqui|$)/,
+  );
+  if (nomeMatch) {
+    const verbox = verboUsado ? verboUsado.charAt(0).toUpperCase() + verboUsado.slice(1) : 'Juntar';
+    nome = `${verbox} ${formatK(valor)} pra ${nomeMatch[1].trim()}`;
+  } else if (/trocar\s+\w+/.test(t)) {
+    const carro = t.match(/\btrocar\s+(?:de\s+|o\s+)?(\w+)/);
+    nome = carro ? `Trocar ${carro[1]}` : `Trocar veículo`;
+  } else if (/viajar/.test(t)) {
+    nome = `Viajar`;
+  } else if (/comprar/.test(t)) {
+    const coisa = t.match(/\bcomprar\s+(?:um|uma|o|a)?\s*(\w+)/);
+    nome = coisa ? `Comprar ${coisa[1]}` : `Comprar`;
+  } else {
+    nome = `${verboUsado ? verboUsado.charAt(0).toUpperCase() + verboUsado.slice(1) : 'Juntar'} ${formatK(valor)}`;
+  }
+
+  // Capitaliza primeira letra
+  nome = nome.charAt(0).toUpperCase() + nome.slice(1);
+
+  return { valor, prazo_meses: prazoMeses, nome };
+}
+
+function formatK(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(0)}M`;
+  if (n >= 1_000) return `${Math.round(n / 1_000)}k`;
+  return `${n}`;
+}
+
+/**
+ * Detecta frases de atualização de valor guardado tipo
+ * "já juntei 30k", "tenho 30 mil guardados", "atualiza meta pra 30k".
+ * Retorna `{ valor, nome? }` ou null.
+ */
+function parseAtualizacaoValorGuardado(texto: string): {
+  valor: number;
+  nome: string | null;
+} | null {
+  const t = normalizarAcentos(texto.toLowerCase()).trim();
+
+  // Palavras gatilho: "já juntei", "tenho", "guardei", "já tenho",
+  // "atualiza meta", "atualizar meta"
+  const temGatilho =
+    /\b(ja\s+(juntei|tenho|guardei|tenho)|tenho|guardei|atualiza\s+meta|atualizar\s+meta|mudei\s+meta|coloquei\s+na\s+meta)\b/.test(t);
+  if (!temGatilho) return null;
+
+  // Extrai valor (mesma lógica do parser de meta longa — não casa "m"
+  // solto pra evitar falso positivo com palavras tipo "meses")
+  const valorMatch =
+    t.match(/\b(\d+(?:[.,]\d+)?)\s*(?:k|mil)\b/i) ||
+    t.match(/\b(\d+(?:[.,]\d+)?)\s*(?:M|milhao|milhoes)\b/) ||
+    t.match(/r?\$?\s*(\d{1,3}(?:[.,]\d{3})+|\d{4,})/) ||
+    t.match(/\b(\d+)\s*reais?\b/);
+  if (!valorMatch) return null;
+
+  let n = parseFloat(valorMatch[1].replace(',', '.'));
+  const sufixo = valorMatch[0].toLowerCase();
+  if (sufixo.includes('k') || /\bmil\b/.test(sufixo)) n *= 1_000;
+  else if (sufixo.includes('milhao') || sufixo.includes('m')) n *= 1_000_000;
+  const valor = Math.round(n);
+
+  // Tenta extrair nome da meta (palavras depois de "pra")
+  let nome: string | null = null;
+  const nomeMatch = t.match(/\b(?:pra|para|de)\s+([a-záéíóúâêôãõç\s]{3,30}?)(?:\s|$)/);
+  if (nomeMatch && !['a', 'o', 'minha', 'minhas', 'uma', 'meta'].includes(nomeMatch[1].trim())) {
+    nome = nomeMatch[1].trim();
+  }
+
+  return { valor, nome };
 }

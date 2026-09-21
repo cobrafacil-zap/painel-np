@@ -16,6 +16,7 @@
 import { createServiceClient } from '@/lib/supabase/server';
 import { formatBRL, todayISO } from '@/lib/utils';
 import { getMetaDiaria, formatarIndicadorMeta } from './meta-diaria';
+import { gerarInsightCurto } from './insights';
 
 export type Slot = '17h' | '23h';
 
@@ -60,7 +61,12 @@ async function calcularResumo(userId: string): Promise<Resumo> {
   return { totalEntrou, totalSaiu, saldo: totalEntrou - totalSaiu, topCategoria };
 }
 
-function formatarMensagem(slot: Slot, r: Resumo, meta: number | null): string {
+function formatarMensagem(
+  slot: Slot,
+  r: Resumo,
+  meta: number | null,
+  insightCurto: string | null,
+): string {
   const hoje = new Date(todayISO() + 'T00:00:00').toLocaleDateString('pt-BR', {
     day: '2-digit',
     month: '2-digit',
@@ -77,13 +83,20 @@ function formatarMensagem(slot: Slot, r: Resumo, meta: number | null): string {
     ? `\n${formatarIndicadorMeta(meta, r.totalSaiu)}`
     : '';
 
+  // Insight personalizado (#overhaul metas-largas) — só slot 23h pra
+  // não encher o saco no meio da tarde. Pega o mais urgente.
+  const insightLine = slot === '23h' && insightCurto
+    ? `\n💡 ${insightCurto}`
+    : '';
+
   return (
     `${emoji} *Relatório ${slot}* (${contexto}, ${hoje})\n\n` +
     `💰 Entrou: ${formatBRL(r.totalEntrou)}\n` +
     `💸 Saiu: ${formatBRL(r.totalSaiu)}\n` +
     `${r.saldo >= 0 ? '✅' : '❌'} Saldo do dia: ${formatBRL(r.saldo)}` +
     metaIndicator +
-    top
+    top +
+    insightLine
   );
 }
 
@@ -130,7 +143,8 @@ export async function gerarRelatoriosDiarios(slot: Slot): Promise<{
       if (resumo.totalEntrou === 0 && resumo.totalSaiu === 0) continue;
 
       const meta = await getMetaDiaria(userId);
-      const messageText = formatarMensagem(slot, resumo, meta);
+      const insightCurto = slot === '23h' ? await gerarInsightCurto(userId) : null;
+      const messageText = formatarMensagem(slot, resumo, meta, insightCurto);
 
       // Dispara já (cron vai rodar 17h/23h, mas a janela de entrega é */5)
       const dispararEm = new Date();
