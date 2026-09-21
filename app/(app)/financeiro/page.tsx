@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { LancamentoForm } from './_components/lancamento-form';
 import { ResumoCharts } from './_components/resumo-charts';
+import { RendaPassivaCard } from './_components/renda-passiva-card';
 import { ArrowRight, ListChecks, ScrollText, Tags } from 'lucide-react';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
@@ -50,6 +51,10 @@ export default function FinanceiroPage() {
           </div>
         }
       />
+
+      {/* Card de planejamento de renda passiva (#feature renda-passiva).
+          Aparece no topo, antes dos atalhos — é o "para quê" de toda a parte financeira. */}
+      <RendaPassivaCard />
 
       {/* Atalhos pros sub-páginas */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">

@@ -6,9 +6,6 @@ import {
   Wallet,
   LayoutDashboard,
   MessageCircle,
-  Tags,
-  ListChecks,
-  ScrollText,
   ListTodo,
   X,
   Heart,
@@ -28,14 +25,6 @@ interface SidebarProps {
 
 const NAV = [
   { href: '/painel', label: 'Visão geral', icon: LayoutDashboard },
-  // agrupados por seção abaixo
-];
-
-const FINANCEIRO = [
-  { href: '/financeiro', label: 'Financeiro', icon: Wallet, isParent: true },
-  { href: '/financeiro/lancamentos', label: 'Lançamentos', icon: ListChecks, indent: true },
-  { href: '/financeiro/compromissos', label: 'Compromissos', icon: ScrollText, indent: true },
-  { href: '/financeiro/categorias', label: 'Categorias', icon: Tags, indent: true },
 ];
 
 const TAREFAS = [{ href: '/tarefas', label: 'Tarefas', icon: ListTodo }];
@@ -109,30 +98,18 @@ export function Sidebar({ open, onClose, profile }: SidebarProps) {
           Visão geral
         </SidebarLink>
 
-        {/* Financeiro */}
+        {/* Financeiro — sem sub-itens no menu. Quando user tá em
+            /financeiro/* (lancamentos, compromissos, categorias), o link
+            também fica ativo. A navegação interna é feita via atalhos
+            dentro da própria landing. */}
         <SidebarLink
           href="/financeiro"
           icon={<Wallet className="w-4 h-4" />}
-          active={pathname === '/financeiro'}
+          active={pathname.startsWith('/financeiro')}
           onClick={onClose}
         >
           Financeiro
         </SidebarLink>
-        {FINANCEIRO.slice(1).map((item) => {
-          const Icon = item.icon as any;
-          return (
-            <SidebarLink
-              key={item.href}
-              href={item.href}
-              icon={<Icon className="w-3.5 h-3.5" />}
-              active={pathname.startsWith(item.href)}
-              onClick={onClose}
-              indent
-            >
-              {item.label}
-            </SidebarLink>
-          );
-        })}
 
         {/* Tarefas */}
         <SidebarLink
