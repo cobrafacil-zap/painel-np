@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient, requireUser } from '@/lib/supabase/server';
+import { getInvestidoPorMes } from '@/lib/financeiro/investimentos-db';
 
 /**
  * GET /api/financeiro/resumo?from=YYYY-MM-DD&to=YYYY-MM-DD
@@ -7,6 +8,7 @@ import { createClient, requireUser } from '@/lib/supabase/server';
  *   - saldo (receitas - gastos)
  *   - total_receitas
  *   - total_gastos
+ *   - total_investido (Reserva + Renda Passiva — entra como receita E gasto)
  *   - por_categoria: [{ category, total, count }]
  *   - evolucao_mensal: [{ mes: 'YYYY-MM', receitas, gastos }]
  */
@@ -58,12 +60,31 @@ export async function GET(req: NextRequest) {
   }
 
   const por_categoria = Object.values(porCategoria).sort((a, b) => b.total - a.total);
+
+  // Investimento não é lançamento, mas conta como receita E gasto
+  // (saldo não muda) — ver lib/financeiro/investimentos.ts.
+  const investidoPorMes = await getInvestidoPorMes(
+    userId,
+    from ?? undefined,
+    to ?? undefined,
+  );
+  let total_investido = 0;
+  for (const [mes, valor] of Object.entries(investidoPorMes)) {
+    total_investido += valor;
+    if (!porMes[mes]) porMes[mes] = { mes, receitas: 0, gastos: 0 };
+    porMes[mes].receitas += valor;
+    porMes[mes].gastos += valor;
+  }
+  total_receitas += total_investido;
+  total_gastos += total_investido;
+
   const evolucao_mensal = Object.values(porMes).sort((a, b) => a.mes.localeCompare(b.mes));
 
   return NextResponse.json({
     saldo: total_receitas - total_gastos,
     total_receitas,
     total_gastos,
+    total_investido,
     por_categoria,
     evolucao_mensal,
   });

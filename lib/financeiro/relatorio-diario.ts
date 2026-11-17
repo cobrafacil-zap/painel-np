@@ -18,12 +18,15 @@ import { formatBRL, todayISO } from '@/lib/utils';
 import { getMetaDiaria, formatarIndicadorMeta } from './meta-diaria';
 import { listMetasLongas } from './metas-longas';
 import { gerarInsightCurto } from './insights';
+import { getInvestidoPeriodo } from './investimentos-db';
 
 export type Slot = '17h' | '23h';
 
 interface Resumo {
-  totalEntrou: number;
-  totalSaiu: number;
+  totalEntrou: number; // inclui investido
+  totalSaiu: number; // inclui investido
+  investido: number;
+  gastoConsumo: number; // só lançamentos — usado na meta diária
   saldo: number;
   topCategoria: { nome: string; total: number } | null;
 }
@@ -59,7 +62,18 @@ async function calcularResumo(userId: string): Promise<Resumo> {
       ? { nome: topEntries[0][0], total: topEntries[0][1] }
       : null;
 
-  return { totalEntrou, totalSaiu, saldo: totalEntrou - totalSaiu, topCategoria };
+  // Investimento não é lançamento, mas conta como receita E gasto
+  // (saldo não muda) — ver lib/financeiro/investimentos.ts.
+  const investido = await getInvestidoPeriodo(userId, hoje, hoje);
+
+  return {
+    totalEntrou: totalEntrou + investido,
+    totalSaiu: totalSaiu + investido,
+    investido,
+    gastoConsumo: totalSaiu,
+    saldo: totalEntrou - totalSaiu,
+    topCategoria,
+  };
 }
 
 function formatarMensagem(
@@ -79,9 +93,15 @@ function formatarMensagem(
     ? `\n🏷️ Top gasto: ${r.topCategoria.nome} (${formatBRL(r.topCategoria.total)})`
     : '';
 
-  // Indicador de meta diária (#extra) — só aparece se meta existir
+  // Indicador de meta diária (#extra) — só aparece se meta existir.
+  // Usa gastoConsumo: investir não estoura o limite do dia.
   const metaIndicator = meta != null && meta > 0
-    ? `\n${formatarIndicadorMeta(meta, r.totalSaiu)}`
+    ? `\n${formatarIndicadorMeta(meta, r.gastoConsumo)}`
+    : '';
+
+  // Investido no dia — entra como receita e gasto (saldo não muda)
+  const investLine = r.investido > 0
+    ? `\n💠 Investido: ${formatBRL(r.investido)} (entra como receita e gasto)`
     : '';
 
   // Insight personalizado (#overhaul metas-largas) — só slot 23h pra
@@ -95,6 +115,7 @@ function formatarMensagem(
     `💰 Entrou: ${formatBRL(r.totalEntrou)}\n` +
     `💸 Saiu: ${formatBRL(r.totalSaiu)}\n` +
     `${r.saldo >= 0 ? '✅' : '❌'} Saldo do dia: ${formatBRL(r.saldo)}` +
+    investLine +
     metaIndicator +
     top +
     insightLine

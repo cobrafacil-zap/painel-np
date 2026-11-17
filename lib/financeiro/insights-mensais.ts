@@ -9,11 +9,13 @@
 
 import { createServiceClient } from '@/lib/supabase/server';
 import { formatBRL } from '@/lib/utils';
+import { getInvestidoPeriodo } from './investimentos-db';
 
 interface MesResumo {
   periodo: string; // 'YYYY-MM'
   totalReceitas: number;
   totalGastos: number;
+  investido: number;
   saldo: number;
   topCategorias: Array<{ categoria: string; total: number }>;
 }
@@ -60,10 +62,15 @@ async function calcularResumo(
     .slice(0, 3)
     .map(([categoria, total]) => ({ categoria, total }));
 
+  // Investimento não é lançamento, mas conta como receita E gasto
+  // (saldo não muda) — ver lib/financeiro/investimentos.ts.
+  const investido = await getInvestidoPeriodo(userId, from, to);
+
   return {
     periodo,
-    totalReceitas,
-    totalGastos,
+    totalReceitas: totalReceitas + investido,
+    totalGastos: totalGastos + investido,
+    investido,
     saldo: totalReceitas - totalGastos,
     topCategorias,
   };
@@ -90,11 +97,17 @@ function formatarMensagem(atual: MesResumo, anterior: MesResumo): string {
     top = `\n\n*Top 3 categorias:*\n${linhas}`;
   }
 
+  const investLine =
+    atual.investido > 0
+      ? `\n💠 Investido: ${formatBRL(atual.investido)} (entra como receita e gasto)`
+      : '';
+
   return (
     `📊 *${atual.periodo} fechou!*\n\n` +
     `💸 Gastos: ${formatBRL(atual.totalGastos)}\n` +
     `💰 Receitas: ${formatBRL(atual.totalReceitas)}\n` +
     `${atual.saldo >= 0 ? '✅' : '❌'} Saldo: ${formatBRL(atual.saldo)}` +
+    investLine +
     top +
     `\n\n${tendencia}`
   );

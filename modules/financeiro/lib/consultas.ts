@@ -3,6 +3,7 @@ import { formatBRL, startOfMonthISO, endOfMonthISO } from '@/lib/utils';
 import type { ParsedIntent } from './parser-mensagem';
 import { resumoCompromissos, listarParcelas } from './compromissos';
 import { setContext } from '@/lib/whatsapp/session';
+import { getInvestidoPeriodo } from '@/lib/financeiro/investimentos-db';
 
 const CATEGORIA_LABEL: Record<string, string> = {
   mercado: 'mercado',
@@ -88,18 +89,31 @@ export async function responderConsulta(
     if (error) return { reply: `Erro ao consultar: ${error.message}` };
 
     const rows = data ?? [];
+
+    // Investimento (Reserva + Renda Passiva) não é lançamento, mas conta
+    // como receita E gasto no período. Só entra quando a consulta não
+    // filtra categoria (depósito não tem categoria).
+    const investido = intent.categoria
+      ? 0
+      : await getInvestidoPeriodo(userId, from, to);
+
     if (intent.tipo === 'saldo') {
-      const receitas = rows.filter((r) => r.type === 'receita').reduce((s, r) => s + Number(r.amount), 0);
-      const gastos = rows.filter((r) => r.type === 'gasto').reduce((s, r) => s + Number(r.amount), 0);
+      const receitas = rows.filter((r) => r.type === 'receita').reduce((s, r) => s + Number(r.amount), 0) + investido;
+      const gastos = rows.filter((r) => r.type === 'gasto').reduce((s, r) => s + Number(r.amount), 0) + investido;
       const saldo = receitas - gastos;
       const sinal = saldo >= 0 ? '🟢 positivo' : '🔴 negativo';
-      return { reply: `Saldo de ${label}: ${formatBRL(saldo)} (${sinal})\nReceitas: ${formatBRL(receitas)} · Gastos: ${formatBRL(gastos)}` };
+      const linhaInvestido =
+        investido > 0
+          ? `\n💠 Investido: ${formatBRL(investido)} (entra como receita e gasto)`
+          : '';
+      return { reply: `Saldo de ${label}: ${formatBRL(saldo)} (${sinal})\nReceitas: ${formatBRL(receitas)} · Gastos: ${formatBRL(gastos)}${linhaInvestido}` };
     }
 
-    const total = rows.reduce((s, r) => s + Number(r.amount), 0);
+    const total = rows.reduce((s, r) => s + Number(r.amount), 0) + investido;
     const tipoLabel = intent.tipo === 'gastos' ? 'gastos' : 'receitas';
     const catLabel = intent.categoria ? ` em '${intent.categoria}'` : '';
-    return { reply: `Total de ${tipoLabel}${catLabel} em ${label}: ${formatBRL(total)} (${rows.length} lançamento${rows.length === 1 ? '' : 's'})` };
+    const extraInvestido = investido > 0 ? ` + ${formatBRL(investido)} investidos` : '';
+    return { reply: `Total de ${tipoLabel}${catLabel} em ${label}: ${formatBRL(total)} (${rows.length} lançamento${rows.length === 1 ? '' : 's'}${extraInvestido})` };
   }
 
   if (intent.tipo === 'top_categoria') {

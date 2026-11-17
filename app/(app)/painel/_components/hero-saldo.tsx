@@ -20,12 +20,15 @@ export function HeroSaldo({
   receitas,
   gastos,
   saldo,
+  investido,
   metaDiaria,
   gastoHoje,
 }: {
   receitas: number;
   gastos: number;
   saldo: number;
+  /** Investido no mês (Reserva + Renda Passiva) — entra como receita E gasto. */
+  investido?: number;
   metaDiaria?: number | null;
   gastoHoje?: number;
 }) {
@@ -105,6 +108,18 @@ export function HeroSaldo({
                 −{formatBRL(displayGastos)}
               </span>
             </div>
+            {(investido ?? 0) > 0 && (
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-sky-400 shrink-0" />
+                <span className="text-zinc-400">Investido</span>
+                <span className="text-sky-300 font-semibold num-tabular">
+                  {formatBRL(investido!)}
+                </span>
+                <span className="text-zinc-500 text-xs">
+                  (entra como receita e gasto)
+                </span>
+              </div>
+            )}
           </div>
         </div>
 

@@ -16,6 +16,7 @@ import { DicaSemana } from './_components/dica-semana';
 import { CuidadoPessoal } from './_components/cuidado-pessoal';
 import { PageHeader } from '../_components/page-header';
 import { getMetaDiaria, getGastoHoje } from '@/lib/financeiro/meta-diaria';
+import { getInvestidoPeriodo } from '@/lib/financeiro/investimentos-db';
 
 export default async function PainelPage() {
   const supabase = await createClient();
@@ -70,18 +71,23 @@ export default async function PainelPage() {
   // Meta diária + gasto de hoje (mini-ring do Hero). Funciona mesmo
   // sem migration 014 aplicada — `getMetaDiaria` retorna null e o
   // HeroSaldo decide não renderizar o ring.
-  const [metaDiaria, gastoHoje] = await Promise.all([
+  const [metaDiaria, gastoHoje, investidoMes] = await Promise.all([
     getMetaDiaria(user.id),
     getGastoHoje(user.id),
+    getInvestidoPeriodo(user.id, inicio, fim),
   ]);
 
   const tarefas = (tarefasRes.data ?? []) as Tarefa[];
-  const receitas = (recordsMesRes.data ?? [])
+  const receitasLancamentos = (recordsMesRes.data ?? [])
     .filter((r: any) => r.type === 'receita')
     .reduce((s: number, r: any) => s + Number(r.amount), 0);
-  const gastos = (recordsMesRes.data ?? [])
+  const gastosLancamentos = (recordsMesRes.data ?? [])
     .filter((r: any) => r.type === 'gasto')
     .reduce((s: number, r: any) => s + Number(r.amount), 0);
+  // Investimento não é lançamento (records), mas conta nos totais do mês
+  // como receita E gasto — o saldo não muda (ver lib/financeiro/investimentos.ts).
+  const receitas = receitasLancamentos + investidoMes;
+  const gastos = gastosLancamentos + investidoMes;
   const saldo = receitas - gastos;
 
   // === 7 dias (sparkline) — array de 7 dias, do mais antigo ao mais recente ===
@@ -155,6 +161,7 @@ export default async function PainelPage() {
         receitas={receitas}
         gastos={gastos}
         saldo={saldo}
+        investido={investidoMes}
         metaDiaria={metaDiaria}
         gastoHoje={gastoHoje}
       />
