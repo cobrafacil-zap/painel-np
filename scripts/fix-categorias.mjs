@@ -63,19 +63,21 @@ if (e3) {
 const userIds = [...new Set((donos ?? []).map((d) => d.user_id))];
 let criadas = 0;
 for (const user_id of userIds) {
-  const { error } = await db.from('categories').upsert(
-    [
-      { user_id, module_id: 'financeiro', slug: 'crediario', label: 'Crediário', icon: 'CreditCard', color: '#0ea5e9', is_system: true },
-      { user_id, module_id: 'financeiro', slug: 'cartao_credito', label: 'Cartão de crédito', icon: 'CreditCard', color: '#6366f1', is_system: true },
-      { user_id, module_id: 'financeiro', slug: 'presentes', label: 'Presentes', icon: 'Gift', color: '#f43f5e', is_system: true },
-    ],
-    { onConflict: 'user_id,module_id,slug', ignoreDuplicates: true },
-  );
+  const rows = [
+    { user_id, module_id: 'financeiro', slug: 'crediario', label: 'Crediário', icon: 'CreditCard', color: '#0ea5e9', is_system: true },
+    { user_id, module_id: 'financeiro', slug: 'cartao_credito', label: 'Cartão de crédito', icon: 'CreditCard', color: '#6366f1', is_system: true },
+    { user_id, module_id: 'financeiro', slug: 'presentes', label: 'Presentes', icon: 'Gift', color: '#f43f5e', is_system: true },
+    { user_id, module_id: 'financeiro', slug: 'eletrodomesticos', label: 'Eletrodomésticos', icon: 'Tv', color: '#14b8a6', is_system: true },
+  ];
+  const { error } = await db.from('categories').upsert(rows, {
+    onConflict: 'user_id,module_id,slug',
+    ignoreDuplicates: true,
+  });
   if (error) {
     console.error('❌ upsert categorias:', error.message);
     process.exit(1);
   }
-  criadas += 3;
+  criadas += rows.length;
 }
-console.log(`✅ 'Crediário' + 'Cartão de crédito' garantidas pra ${userIds.length} user(s) (${criadas} slots)`);
+console.log(`✅ Categorias padrão (Crediário, Cartão de crédito, Presentes, Eletrodomésticos) garantidas pra ${userIds.length} user(s) (${criadas} slots)`);
 console.log('\n--- Pronto ---');
