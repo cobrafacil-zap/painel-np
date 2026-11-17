@@ -25,7 +25,7 @@ interface Resumo {
   por_forma: Array<{ forma: string | null; total: number; count: number }>;
   gastos_por_categoria?: Record<
     string,
-    Array<{ description: string; total: number; occurred_at: string }>
+    Array<{ description: string; total: number; count: number; occurred_at: string }>
   >;
   evolucao_mensal: Array<{ mes: string; receitas: number; gastos: number }>;
 }
@@ -35,8 +35,8 @@ interface LinhaTabela {
   total: number;
   cor: string;
   pct: number;
-  /** Todos os gastos do grupo (expande no clique). */
-  detalhes?: Array<{ label: string; total: number; date: string }>;
+  /** Todos os gastos do grupo — iguais somados juntos (expande no clique). */
+  detalhes?: Array<{ label: string; total: number; count: number; date: string }>;
 }
 
 const PALETTE = ['#22c55e', '#3b82f6', '#f59e0b', '#8b5cf6', '#ef4444', '#ec4899', '#06b6d4', '#a855f7', '#10b981', '#0ea5e9'];
@@ -123,6 +123,7 @@ export function ResumoCharts({ refreshKey }: { refreshKey: number }) {
       detalhes: (data.gastos_por_categoria?.[c.category ?? ''] ?? []).map((d) => ({
         label: d.description,
         total: d.total,
+        count: d.count,
         date: d.occurred_at,
       })),
     })),
@@ -303,6 +304,7 @@ function TabelaGastos({ titulo, linhas }: { titulo: string; linhas: LinhaTabela[
                                   {d.label}
                                 </span>
                                 <span className="text-zinc-500 text-xs shrink-0 whitespace-nowrap">
+                                  {d.count > 1 ? `${d.count}× · ` : ''}
                                   {d.date ? formatDateBR(d.date) : ''}
                                 </span>
                                 <span className="text-zinc-100 text-[13px] num-tabular shrink-0">
