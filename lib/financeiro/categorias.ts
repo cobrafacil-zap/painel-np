@@ -36,6 +36,12 @@ export interface CategorySuggestion {
 }
 
 /**
+ * Categorias que a IA não pode criar — o slug redireciona pra 'outros'.
+ * Ex: 'droga', criada por auto-categorização e removida pelo usuário.
+ */
+const CATEGORIAS_BLOQUEADAS = new Set(['droga']);
+
+/**
  * Sugere categoria a partir do texto via Groq. Retorna null se incerto.
  *
  * Estratégia: prompt mínimo pedindo slug em snake_case + label curto.
@@ -103,6 +109,11 @@ export async function ensureCategory(
   label: string,
   moduleId: string = 'financeiro',
 ): Promise<{ id: string; slug: string; label: string } | null> {
+  // Categoria bloqueada nunca é criada — cai em 'outros'
+  if (CATEGORIAS_BLOQUEADAS.has(slug)) {
+    slug = 'outros';
+    label = 'Outros';
+  }
   try {
     const supabase = createServiceClient();
 
