@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { formatBRL, startOfMonthISO, endOfMonthISO } from '@/lib/utils';
+import { labelForma } from '@/lib/financeiro/formas-pagamento';
 import { TrendingUp, TrendingDown, Wallet } from 'lucide-react';
 import { useCountUp } from '@/lib/hooks/use-count-up';
 import {
@@ -20,8 +21,16 @@ interface Resumo {
   total_receitas: number;
   total_gastos: number;
   total_investido?: number;
-  por_categoria: Array<{ category: string; total: number; count: number }>;
+  por_categoria: Array<{ category: string | null; total: number; count: number }>;
+  por_forma: Array<{ forma: string | null; total: number; count: number }>;
   evolucao_mensal: Array<{ mes: string; receitas: number; gastos: number }>;
+}
+
+interface LinhaTabela {
+  label: string;
+  total: number;
+  cor: string;
+  pct: number;
 }
 
 const PALETTE = ['#22c55e', '#3b82f6', '#f59e0b', '#8b5cf6', '#ef4444', '#ec4899', '#06b6d4', '#a855f7', '#10b981', '#0ea5e9'];
@@ -29,6 +38,7 @@ const COR_INVESTIDO = '#38bdf8';
 
 const MESES = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
 
+/** 'cartao_credito' → 'Cartao credito' (slug vira texto legível) */
 function labelCategoria(slug: string): string {
   const s = slug.replace(/_/g, ' ');
   return s.charAt(0).toUpperCase() + s.slice(1);
@@ -80,25 +90,36 @@ export function ResumoCharts({ refreshKey }: { refreshKey: number }) {
   }
   if (!data) return null;
 
-  // === Gastos por categoria (tabela) ===
   // Investimento não é lançamento, mas conta como gasto do mês — entra
-  // como linha própria pra tabela bater com o total de Gastos.
+  // como linha própria pra cada tabela bater com o total de Gastos.
   const investido = data.total_investido ?? 0;
-  const categorias = data.por_categoria.map((c, i) => ({
-    label: labelCategoria(c.category),
-    total: c.total,
-    cor: PALETTE[i % PALETTE.length],
-  }));
-  if (investido > 0) {
-    categorias.push({ label: 'Investimentos', total: investido, cor: COR_INVESTIDO });
-  }
-  const totalTabela = categorias.reduce((s, c) => s + c.total, 0);
-  const linhas = categorias
-    .map((c) => ({
-      ...c,
-      pct: totalTabela > 0 ? (c.total / totalTabela) * 100 : 0,
-    }))
-    .sort((a, b) => b.total - a.total);
+  const montarLinhas = (itens: { label: string; total: number }[]): LinhaTabela[] => {
+    const comInvestido = [...itens];
+    if (investido > 0) {
+      comInvestido.push({ label: 'Investimentos', total: investido });
+    }
+    const totalTabela = comInvestido.reduce((s, c) => s + c.total, 0);
+    return comInvestido
+      .map((c, i) => ({
+        ...c,
+        cor: c.label === 'Investimentos' ? COR_INVESTIDO : PALETTE[i % PALETTE.length],
+        pct: totalTabela > 0 ? (c.total / totalTabela) * 100 : 0,
+      }))
+      .sort((a, b) => b.total - a.total);
+  };
+
+  const linhasCategoria = montarLinhas(
+    data.por_categoria.map((c) => ({
+      label: c.category ? labelCategoria(c.category) : 'Não informado',
+      total: c.total,
+    })),
+  );
+  const linhasTipo = montarLinhas(
+    data.por_forma.map((c) => ({
+      label: c.forma ? labelForma(c.forma) : 'Não informado',
+      total: c.total,
+    })),
+  );
 
   return (
     <div className="space-y-4">
@@ -123,111 +144,118 @@ export function ResumoCharts({ refreshKey }: { refreshKey: number }) {
         />
       </div>
 
+      {/* TABELAS — gastos por categoria e por tipo de pagamento */}
       <div className="grid gap-4 lg:grid-cols-2">
-        {/* TABELA — gastos por categoria */}
-        <div className="glass p-5">
-          <h3 className="font-semibold mb-3">Gastos por categoria</h3>
-          {linhas.length === 0 ? (
-            <p className="text-sm text-zinc-500">Sem gastos no período.</p>
-          ) : (
-            <table className="w-full text-sm">
+        <TabelaGastos titulo="Gastos por categoria" linhas={linhasCategoria} />
+        <TabelaGastos titulo="Gastos por tipo" linhas={linhasTipo} />
+      </div>
+
+      {/* GRÁFICO + TABELA — evolução mensal */}
+      <div className="glass p-5">
+        <h3 className="font-semibold mb-3">Evolução mensal (últimos 6 meses)</h3>
+        {evolucao.length === 0 ? (
+          <p className="text-sm text-zinc-500">Sem dados.</p>
+        ) : (
+          <>
+            <ResponsiveContainer width="100%" height={190}>
+              <LineChart data={evolucao}>
+                <CartesianGrid stroke="#2a2a32" strokeDasharray="3 3" />
+                <XAxis
+                  dataKey="mes"
+                  tick={{ fontSize: 11, fill: '#a1a1aa' }}
+                  stroke="#3f3f46"
+                  tickFormatter={labelMes}
+                />
+                <YAxis
+                  tick={{ fontSize: 11, fill: '#a1a1aa' }}
+                  stroke="#3f3f46"
+                />
+                <Tooltip
+                  contentStyle={{ background: '#15151a', border: '1px solid #2a2a32', borderRadius: 8 }}
+                  labelStyle={{ color: '#e4e4e7' }}
+                  itemStyle={{ color: '#e4e4e7' }}
+                  labelFormatter={(m) => labelMes(String(m))}
+                  formatter={(v: number) => formatBRL(v)}
+                />
+                <Legend
+                  formatter={(v) => (
+                    <span style={{ color: '#d4d4d8' }}>
+                      {v === 'receitas' ? 'Receitas' : 'Gastos'}
+                    </span>
+                  )}
+                />
+                <Line type="monotone" dataKey="receitas" stroke="#22c55e" strokeWidth={2} dot={{ r: 3 }} />
+                <Line type="monotone" dataKey="gastos" stroke="#ef4444" strokeWidth={2} dot={{ r: 3 }} />
+              </LineChart>
+            </ResponsiveContainer>
+
+            <table className="w-full text-sm mt-4">
               <thead>
                 <tr className="text-left text-xs text-zinc-500">
-                  <th className="font-medium pb-2">Categoria</th>
-                  <th className="font-medium pb-2 text-right">Valor</th>
-                  <th className="font-medium pb-2 text-right w-14">%</th>
+                  <th className="font-medium pb-2">Mês</th>
+                  <th className="font-medium pb-2 text-right">Receitas</th>
+                  <th className="font-medium pb-2 text-right">Gastos</th>
                 </tr>
               </thead>
               <tbody>
-                {linhas.map((l) => (
-                  <tr key={l.label} className="border-t border-white/[0.05]">
-                    <td className="py-2.5">
-                      <span className="flex items-center gap-2 min-w-0">
-                        <span
-                          className="w-2 h-2 rounded-full shrink-0"
-                          style={{ background: l.cor }}
-                        />
-                        <span className="text-zinc-200 truncate">{l.label}</span>
-                      </span>
+                {evolucao.map((m) => (
+                  <tr key={m.mes} className="border-t border-white/[0.05]">
+                    <td className="py-2 text-zinc-200">{labelMes(m.mes)}</td>
+                    <td className="py-2 text-right num-tabular text-emerald-300">
+                      {formatBRL(m.receitas)}
                     </td>
-                    <td className="py-2.5 text-right num-tabular text-zinc-100">
-                      {formatBRL(l.total)}
-                    </td>
-                    <td className="py-2.5 text-right num-tabular text-zinc-400">
-                      {l.pct.toFixed(0)}%
+                    <td className="py-2 text-right num-tabular text-red-300">
+                      {formatBRL(m.gastos)}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          )}
-        </div>
-
-        {/* GRÁFICO + TABELA — evolução mensal */}
-        <div className="glass p-5">
-          <h3 className="font-semibold mb-3">Evolução mensal (últimos 6 meses)</h3>
-          {evolucao.length === 0 ? (
-            <p className="text-sm text-zinc-500">Sem dados.</p>
-          ) : (
-            <>
-              <ResponsiveContainer width="100%" height={190}>
-                <LineChart data={evolucao}>
-                  <CartesianGrid stroke="#2a2a32" strokeDasharray="3 3" />
-                  <XAxis
-                    dataKey="mes"
-                    tick={{ fontSize: 11, fill: '#a1a1aa' }}
-                    stroke="#3f3f46"
-                    tickFormatter={labelMes}
-                  />
-                  <YAxis
-                    tick={{ fontSize: 11, fill: '#a1a1aa' }}
-                    stroke="#3f3f46"
-                  />
-                  <Tooltip
-                    contentStyle={{ background: '#15151a', border: '1px solid #2a2a32', borderRadius: 8 }}
-                    labelStyle={{ color: '#e4e4e7' }}
-                    itemStyle={{ color: '#e4e4e7' }}
-                    labelFormatter={(m) => labelMes(String(m))}
-                    formatter={(v: number) => formatBRL(v)}
-                  />
-                  <Legend
-                    formatter={(v) => (
-                      <span style={{ color: '#d4d4d8' }}>
-                        {v === 'receitas' ? 'Receitas' : 'Gastos'}
-                      </span>
-                    )}
-                  />
-                  <Line type="monotone" dataKey="receitas" stroke="#22c55e" strokeWidth={2} dot={{ r: 3 }} />
-                  <Line type="monotone" dataKey="gastos" stroke="#ef4444" strokeWidth={2} dot={{ r: 3 }} />
-                </LineChart>
-              </ResponsiveContainer>
-
-              <table className="w-full text-sm mt-4">
-                <thead>
-                  <tr className="text-left text-xs text-zinc-500">
-                    <th className="font-medium pb-2">Mês</th>
-                    <th className="font-medium pb-2 text-right">Receitas</th>
-                    <th className="font-medium pb-2 text-right">Gastos</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {evolucao.map((m) => (
-                    <tr key={m.mes} className="border-t border-white/[0.05]">
-                      <td className="py-2 text-zinc-200">{labelMes(m.mes)}</td>
-                      <td className="py-2 text-right num-tabular text-emerald-300">
-                        {formatBRL(m.receitas)}
-                      </td>
-                      <td className="py-2 text-right num-tabular text-red-300">
-                        {formatBRL(m.gastos)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </>
-          )}
-        </div>
+          </>
+        )}
       </div>
+    </div>
+  );
+}
+
+function TabelaGastos({ titulo, linhas }: { titulo: string; linhas: LinhaTabela[] }) {
+  return (
+    <div className="glass p-5">
+      <h3 className="font-semibold mb-3">{titulo}</h3>
+      {linhas.length === 0 ? (
+        <p className="text-sm text-zinc-500">Sem gastos no período.</p>
+      ) : (
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-xs text-zinc-500">
+              <th className="font-medium pb-2">{titulo.replace('Gastos por ', '')}</th>
+              <th className="font-medium pb-2 text-right">Valor</th>
+              <th className="font-medium pb-2 text-right w-14">%</th>
+            </tr>
+          </thead>
+          <tbody>
+            {linhas.map((l) => (
+              <tr key={l.label} className="border-t border-white/[0.05]">
+                <td className="py-2.5">
+                  <span className="flex items-center gap-2 min-w-0">
+                    <span
+                      className="w-2 h-2 rounded-full shrink-0"
+                      style={{ background: l.cor }}
+                    />
+                    <span className="text-zinc-200 truncate">{l.label}</span>
+                  </span>
+                </td>
+                <td className="py-2.5 text-right num-tabular text-zinc-100">
+                  {formatBRL(l.total)}
+                </td>
+                <td className="py-2.5 text-right num-tabular text-zinc-400">
+                  {l.pct.toFixed(0)}%
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </div>
   );
 }

@@ -17,15 +17,9 @@ import { createClient } from '@/lib/supabase/client';
 import type { Category, FinanceRecord } from '@/lib/types';
 import { Modal } from '@/components/ui/modal';
 import { formatBRL } from '@/lib/utils';
+import { FORMAS_PAGAMENTO } from '@/lib/financeiro/formas-pagamento';
 
-const PAYMENT_METHODS = [
-  { value: 'pix', label: 'PIX' },
-  { value: 'cartao_credito', label: 'Crédito' },
-  { value: 'cartao_debito', label: 'Débito' },
-  { value: 'dinheiro', label: 'Dinheiro' },
-  { value: 'boleto', label: 'Boleto' },
-  { value: 'transferencia', label: 'Transf.' },
-];
+const PAYMENT_METHODS = FORMAS_PAGAMENTO;
 
 export function EditLancamentoDrawer({
   record,

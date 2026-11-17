@@ -4,16 +4,10 @@ import { useState, useEffect, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import type { Category } from '@/lib/types';
 import { todayISO } from '@/lib/utils';
+import { FORMAS_PAGAMENTO } from '@/lib/financeiro/formas-pagamento';
 import { Plus, X } from 'lucide-react';
 
-const PAYMENT_METHODS = [
-  { value: 'pix', label: 'PIX' },
-  { value: 'cartao_credito', label: 'Crédito' },
-  { value: 'cartao_debito', label: 'Débito' },
-  { value: 'dinheiro', label: 'Dinheiro' },
-  { value: 'boleto', label: 'Boleto' },
-  { value: 'transferencia', label: 'Transf.' },
-];
+const PAYMENT_METHODS = FORMAS_PAGAMENTO;
 
 export function LancamentoForm({ onCreated }: { onCreated: () => void }) {
   const [open, setOpen] = useState(false);

@@ -77,7 +77,7 @@ DISTINÇÃO IMPORTANTE:
   de casa física).
 
 FORMAS DE PAGAMENTO (slug):
-pix, cartao_credito, cartao_debito, dinheiro, boleto, transferencia
+pix, cartao_credito, cartao_debito, crediario, dinheiro, boleto, transferencia
 
 INTENÇÕES:
 - lancamento: registro simples (gasto/receita). Ex: "gastei 50 no mercado".

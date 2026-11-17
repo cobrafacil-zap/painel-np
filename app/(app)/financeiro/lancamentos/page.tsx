@@ -6,9 +6,10 @@ import { createClient } from '@/lib/supabase/client';
 import type { FinanceRecord } from '@/lib/types';
 import { LancamentoForm } from '../_components/lancamento-form';
 import { formatBRL, formatDateBR } from '@/lib/utils';
+import { labelForma } from '@/lib/financeiro/formas-pagamento';
 import { Trash2, Pencil, ChevronUp, ChevronDown } from 'lucide-react';
 
-type OrdemCol = 'occurred_at' | 'description' | 'category' | 'amount';
+type OrdemCol = 'occurred_at' | 'description' | 'category' | 'payment_method' | 'amount';
 
 // Lazy-load: drawer só baixa quando o usuário abre pra editar.
 // Evita inflar o bundle da list page com forms.
@@ -59,7 +60,10 @@ export default function LancamentosPage() {
       o.col === col
         ? { col, asc: !o.asc }
         : // Texto começa A→Z; data e valor começam do maior/recente
-          { col, asc: col === 'description' || col === 'category' },
+          {
+            col,
+            asc: col === 'description' || col === 'category' || col === 'payment_method',
+          },
     );
   }
 
@@ -71,9 +75,15 @@ export default function LancamentosPage() {
         cmp = Number(a.amount) - Number(b.amount);
       } else if (ordem.col === 'occurred_at') {
         cmp = (a.occurred_at ?? '').localeCompare(b.occurred_at ?? '');
+      } else if (ordem.col === 'payment_method') {
+        cmp = labelForma(a.payment_method).localeCompare(
+          labelForma(b.payment_method),
+          'pt-BR',
+          { sensitivity: 'base' },
+        );
       } else {
-        const va = (a[ordem.col] ?? '') as string;
-        const vb = (b[ordem.col] ?? '') as string;
+        const va = (ordem.col === 'category' ? a.category : a.description) ?? '';
+        const vb = (ordem.col === 'category' ? b.category : b.description) ?? '';
         cmp = va.localeCompare(vb, 'pt-BR', { sensitivity: 'base' });
       }
       if (cmp !== 0) return ordem.asc ? cmp : -cmp;
@@ -122,7 +132,7 @@ export default function LancamentosPage() {
                 <ThOrdenavel col="occurred_at" label="Data" ordem={ordem} onClick={alternarOrdenacao} />
                 <ThOrdenavel col="description" label="Descrição" ordem={ordem} onClick={alternarOrdenacao} />
                 <ThOrdenavel col="category" label="Categoria" ordem={ordem} onClick={alternarOrdenacao} />
-                <th className="text-left px-4 py-2.5 font-medium">Forma</th>
+                <ThOrdenavel col="payment_method" label="Tipo" ordem={ordem} onClick={alternarOrdenacao} />
                 <ThOrdenavel col="amount" label="Valor" ordem={ordem} onClick={alternarOrdenacao} align="right" />
                 <th className="text-right px-4 py-2.5 font-medium">Origem</th>
                 <th className="w-20"></th>
@@ -134,7 +144,7 @@ export default function LancamentosPage() {
                   <td className="px-4 py-2.5 text-zinc-400 whitespace-nowrap">{formatDateBR(r.occurred_at)}</td>
                   <td className="px-4 py-2.5">{r.description ?? '—'}</td>
                   <td className="px-4 py-2.5 text-zinc-400">{r.category ?? '—'}</td>
-                  <td className="px-4 py-2.5 text-zinc-400">{r.payment_method ?? '—'}</td>
+                  <td className="px-4 py-2.5 text-zinc-400">{labelForma(r.payment_method)}</td>
                   <td className={`px-4 py-2.5 text-right font-medium tabular-nums ${r.type === 'receita' ? 'text-emerald-300' : 'text-red-300'}`}>
                     {r.type === 'receita' ? '+' : '−'} {formatBRL(Number(r.amount))}
                   </td>

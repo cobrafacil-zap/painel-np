@@ -10,6 +10,7 @@ import { getInvestidoPorMes } from '@/lib/financeiro/investimentos-db';
  *   - total_gastos
  *   - total_investido (Reserva + Renda Passiva — entra como receita E gasto)
  *   - por_categoria: [{ category, total, count }]
+ *   - por_forma: [{ forma, total, count }] (gastos por tipo de pagamento)
  *   - evolucao_mensal: [{ mes: 'YYYY-MM', receitas, gastos }]
  */
 export async function GET(req: NextRequest) {
@@ -21,7 +22,7 @@ export async function GET(req: NextRequest) {
   const supabase = await createClient();
   let q = supabase
     .from('records')
-    .select('type, amount, category, occurred_at')
+    .select('type, amount, category, payment_method, occurred_at')
     .eq('user_id', userId)
     .eq('module_id', 'financeiro');
 
@@ -34,7 +35,8 @@ export async function GET(req: NextRequest) {
   const rows = data ?? [];
   let total_receitas = 0;
   let total_gastos = 0;
-  const porCategoria: Record<string, { category: string; total: number; count: number }> = {};
+  const porCategoria: Record<string, { category: string | null; total: number; count: number }> = {};
+  const porForma: Record<string, { forma: string | null; total: number; count: number }> = {};
   const porMes: Record<string, { mes: string; receitas: number; gastos: number }> = {};
 
   for (const r of rows) {
@@ -42,12 +44,17 @@ export async function GET(req: NextRequest) {
     if (r.type === 'receita') total_receitas += amt;
     else if (r.type === 'gasto') total_gastos += amt;
 
-    // por categoria (só gastos)
-    if (r.type === 'gasto' && r.category) {
-      const key = r.category;
-      if (!porCategoria[key]) porCategoria[key] = { category: key, total: 0, count: 0 };
-      porCategoria[key].total += amt;
-      porCategoria[key].count += 1;
+    // por categoria e por tipo de pagamento (só gastos)
+    if (r.type === 'gasto') {
+      const keyCat = r.category ?? '';
+      if (!porCategoria[keyCat]) porCategoria[keyCat] = { category: r.category ?? null, total: 0, count: 0 };
+      porCategoria[keyCat].total += amt;
+      porCategoria[keyCat].count += 1;
+
+      const keyForma = r.payment_method ?? '';
+      if (!porForma[keyForma]) porForma[keyForma] = { forma: r.payment_method ?? null, total: 0, count: 0 };
+      porForma[keyForma].total += amt;
+      porForma[keyForma].count += 1;
     }
 
     // evolução mensal
@@ -60,6 +67,7 @@ export async function GET(req: NextRequest) {
   }
 
   const por_categoria = Object.values(porCategoria).sort((a, b) => b.total - a.total);
+  const por_forma = Object.values(porForma).sort((a, b) => b.total - a.total);
 
   // Investimento não é lançamento, mas conta como receita E gasto
   // (saldo não muda) — ver lib/financeiro/investimentos.ts.
@@ -86,6 +94,7 @@ export async function GET(req: NextRequest) {
     total_gastos,
     total_investido,
     por_categoria,
+    por_forma,
     evolucao_mensal,
   });
 }
