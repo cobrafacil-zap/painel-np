@@ -1,7 +1,7 @@
 'use client';
 
 import { Fragment, useEffect, useState } from 'react';
-import { formatBRL, startOfMonthISO, endOfMonthISO } from '@/lib/utils';
+import { formatBRL, formatDateBR, startOfMonthISO, endOfMonthISO } from '@/lib/utils';
 import { labelForma } from '@/lib/financeiro/formas-pagamento';
 import { TrendingUp, TrendingDown, Wallet, ChevronDown } from 'lucide-react';
 import { useCountUp } from '@/lib/hooks/use-count-up';
@@ -23,9 +23,9 @@ interface Resumo {
   total_investido?: number;
   por_categoria: Array<{ category: string | null; total: number; count: number }>;
   por_forma: Array<{ forma: string | null; total: number; count: number }>;
-  top_por_categoria?: Record<
+  gastos_por_categoria?: Record<
     string,
-    Array<{ description: string; total: number; count: number }>
+    Array<{ description: string; total: number; occurred_at: string }>
   >;
   evolucao_mensal: Array<{ mes: string; receitas: number; gastos: number }>;
 }
@@ -35,8 +35,8 @@ interface LinhaTabela {
   total: number;
   cor: string;
   pct: number;
-  /** Top "coisas" mais caras dentro do grupo (expande no clique). */
-  detalhes?: Array<{ label: string; total: number; count: number }>;
+  /** Todos os gastos do grupo (expande no clique). */
+  detalhes?: Array<{ label: string; total: number; date: string }>;
 }
 
 const PALETTE = ['#22c55e', '#3b82f6', '#f59e0b', '#8b5cf6', '#ef4444', '#ec4899', '#06b6d4', '#a855f7', '#10b981', '#0ea5e9'];
@@ -120,10 +120,10 @@ export function ResumoCharts({ refreshKey }: { refreshKey: number }) {
     data.por_categoria.map((c) => ({
       label: c.category ? labelCategoria(c.category) : 'Não informado',
       total: c.total,
-      detalhes: (data.top_por_categoria?.[c.category ?? ''] ?? []).map((d) => ({
+      detalhes: (data.gastos_por_categoria?.[c.category ?? ''] ?? []).map((d) => ({
         label: d.description,
         total: d.total,
-        count: d.count,
+        date: d.occurred_at,
       })),
     })),
   );
@@ -302,7 +302,9 @@ function TabelaGastos({ titulo, linhas }: { titulo: string; linhas: LinhaTabela[
                                 <span className="text-zinc-300 text-[13px] truncate flex-1">
                                   {d.label}
                                 </span>
-                                <span className="text-zinc-500 text-xs shrink-0">{d.count}×</span>
+                                <span className="text-zinc-500 text-xs shrink-0 whitespace-nowrap">
+                                  {d.date ? formatDateBR(d.date) : ''}
+                                </span>
                                 <span className="text-zinc-100 text-[13px] num-tabular shrink-0">
                                   {formatBRL(d.total)}
                                 </span>

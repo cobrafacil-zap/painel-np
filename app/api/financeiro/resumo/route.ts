@@ -11,7 +11,7 @@ import { getInvestidoPorMes } from '@/lib/financeiro/investimentos-db';
  *   - total_investido (Reserva + Renda Passiva — entra como receita E gasto)
  *   - por_categoria: [{ category, total, count }]
  *   - por_forma: [{ forma, total, count }] (gastos por tipo de pagamento)
- *   - top_por_categoria: { [category]: [{ description, total, count }] } (top 3)
+ *   - gastos_por_categoria: { [category]: [{ description, total, occurred_at }] }
  *   - evolucao_mensal: [{ mes: 'YYYY-MM', receitas, gastos }]
  */
 export async function GET(req: NextRequest) {
@@ -38,7 +38,10 @@ export async function GET(req: NextRequest) {
   let total_gastos = 0;
   const porCategoria: Record<string, { category: string | null; total: number; count: number }> = {};
   const porForma: Record<string, { forma: string | null; total: number; count: number }> = {};
-  const descPorCategoria: Record<string, Record<string, { description: string; total: number; count: number }>> = {};
+  const gastosPorCategoria: Record<
+    string,
+    Array<{ description: string; total: number; occurred_at: string }>
+  > = {};
   const porMes: Record<string, { mes: string; receitas: number; gastos: number }> = {};
 
   for (const r of rows) {
@@ -53,14 +56,13 @@ export async function GET(req: NextRequest) {
       porCategoria[keyCat].total += amt;
       porCategoria[keyCat].count += 1;
 
-      // "coisas" (descrições) mais caras dentro de cada categoria
-      const descLabel = (r.description ?? '').trim() || 'Sem descrição';
-      if (!descPorCategoria[keyCat]) descPorCategoria[keyCat] = {};
-      if (!descPorCategoria[keyCat][descLabel]) {
-        descPorCategoria[keyCat][descLabel] = { description: descLabel, total: 0, count: 0 };
-      }
-      descPorCategoria[keyCat][descLabel].total += amt;
-      descPorCategoria[keyCat][descLabel].count += 1;
+      // TODOS os gastos dentro de cada categoria (detalhe da expansão)
+      if (!gastosPorCategoria[keyCat]) gastosPorCategoria[keyCat] = [];
+      gastosPorCategoria[keyCat].push({
+        description: (r.description ?? '').trim() || 'Sem descrição',
+        total: amt,
+        occurred_at: r.occurred_at ?? '',
+      });
 
       const keyForma = r.payment_method ?? '';
       if (!porForma[keyForma]) porForma[keyForma] = { forma: r.payment_method ?? null, total: 0, count: 0 };
@@ -79,14 +81,8 @@ export async function GET(req: NextRequest) {
 
   const por_categoria = Object.values(porCategoria).sort((a, b) => b.total - a.total);
   const por_forma = Object.values(porForma).sort((a, b) => b.total - a.total);
-  const top_por_categoria: Record<
-    string,
-    Array<{ description: string; total: number; count: number }>
-  > = {};
-  for (const [cat, descs] of Object.entries(descPorCategoria)) {
-    top_por_categoria[cat] = Object.values(descs)
-      .sort((a, b) => b.total - a.total)
-      .slice(0, 3);
+  for (const lista of Object.values(gastosPorCategoria)) {
+    lista.sort((a, b) => b.total - a.total);
   }
 
   // Investimento não é lançamento, mas conta como receita E gasto
@@ -115,7 +111,7 @@ export async function GET(req: NextRequest) {
     total_investido,
     por_categoria,
     por_forma,
-    top_por_categoria,
+    gastos_por_categoria: gastosPorCategoria,
     evolucao_mensal,
   });
 }
