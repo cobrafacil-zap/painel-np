@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { formatBRL, startOfMonthISO, endOfMonthISO } from '@/lib/utils';
 import { labelForma } from '@/lib/financeiro/formas-pagamento';
-import { TrendingUp, TrendingDown, Wallet } from 'lucide-react';
+import { TrendingUp, TrendingDown, Wallet, ChevronDown } from 'lucide-react';
 import { useCountUp } from '@/lib/hooks/use-count-up';
 import {
   LineChart,
@@ -23,6 +23,10 @@ interface Resumo {
   total_investido?: number;
   por_categoria: Array<{ category: string | null; total: number; count: number }>;
   por_forma: Array<{ forma: string | null; total: number; count: number }>;
+  top_por_categoria?: Record<
+    string,
+    Array<{ description: string; total: number; count: number }>
+  >;
   evolucao_mensal: Array<{ mes: string; receitas: number; gastos: number }>;
 }
 
@@ -31,6 +35,8 @@ interface LinhaTabela {
   total: number;
   cor: string;
   pct: number;
+  /** Top "coisas" mais caras dentro do grupo (expande no clique). */
+  detalhes?: Array<{ label: string; total: number; count: number }>;
 }
 
 const PALETTE = ['#22c55e', '#3b82f6', '#f59e0b', '#8b5cf6', '#ef4444', '#ec4899', '#06b6d4', '#a855f7', '#10b981', '#0ea5e9'];
@@ -93,7 +99,9 @@ export function ResumoCharts({ refreshKey }: { refreshKey: number }) {
   // Investimento não é lançamento, mas conta como gasto do mês — entra
   // como linha própria pra cada tabela bater com o total de Gastos.
   const investido = data.total_investido ?? 0;
-  const montarLinhas = (itens: { label: string; total: number }[]): LinhaTabela[] => {
+  const montarLinhas = (
+    itens: { label: string; total: number; detalhes?: LinhaTabela['detalhes'] }[],
+  ): LinhaTabela[] => {
     const comInvestido = [...itens];
     if (investido > 0) {
       comInvestido.push({ label: 'Investimentos', total: investido });
@@ -112,6 +120,11 @@ export function ResumoCharts({ refreshKey }: { refreshKey: number }) {
     data.por_categoria.map((c) => ({
       label: c.category ? labelCategoria(c.category) : 'Não informado',
       total: c.total,
+      detalhes: (data.top_por_categoria?.[c.category ?? ''] ?? []).map((d) => ({
+        label: d.description,
+        total: d.total,
+        count: d.count,
+      })),
     })),
   );
   const linhasTipo = montarLinhas(
@@ -219,6 +232,7 @@ export function ResumoCharts({ refreshKey }: { refreshKey: number }) {
 }
 
 function TabelaGastos({ titulo, linhas }: { titulo: string; linhas: LinhaTabela[] }) {
+  const [aberta, setAberta] = useState<string | null>(null);
   return (
     <div className="glass p-5">
       <h3 className="font-semibold mb-3">{titulo}</h3>
@@ -234,25 +248,82 @@ function TabelaGastos({ titulo, linhas }: { titulo: string; linhas: LinhaTabela[
             </tr>
           </thead>
           <tbody>
-            {linhas.map((l) => (
-              <tr key={l.label} className="border-t border-white/[0.05]">
-                <td className="py-2.5">
-                  <span className="flex items-center gap-2 min-w-0">
-                    <span
-                      className="w-2 h-2 rounded-full shrink-0"
-                      style={{ background: l.cor }}
-                    />
-                    <span className="text-zinc-200 truncate">{l.label}</span>
-                  </span>
-                </td>
-                <td className="py-2.5 text-right num-tabular text-zinc-100">
-                  {formatBRL(l.total)}
-                </td>
-                <td className="py-2.5 text-right num-tabular text-zinc-400">
-                  {l.pct.toFixed(0)}%
-                </td>
-              </tr>
-            ))}
+            {linhas.map((l) => {
+              const temDetalhe = (l.detalhes?.length ?? 0) > 0;
+              const expandida = aberta === l.label;
+              const maxDetalhe = l.detalhes?.[0]?.total || 1;
+              return (
+                <Fragment key={l.label}>
+                  <tr
+                    onClick={() => temDetalhe && setAberta(expandida ? null : l.label)}
+                    className={`border-t border-white/[0.05] ${
+                      temDetalhe ? 'cursor-pointer hover:bg-white/[0.025]' : ''
+                    }`}
+                  >
+                    <td className="py-2.5">
+                      <span className="flex items-center gap-2 min-w-0">
+                        <span
+                          className="w-2 h-2 rounded-full shrink-0"
+                          style={{ background: l.cor }}
+                        />
+                        <span className="text-zinc-200 truncate">{l.label}</span>
+                        {temDetalhe && (
+                          <ChevronDown
+                            className={`w-3.5 h-3.5 text-zinc-500 shrink-0 transition-transform duration-200 ${
+                              expandida ? 'rotate-180' : ''
+                            }`}
+                          />
+                        )}
+                      </span>
+                    </td>
+                    <td className="py-2.5 text-right num-tabular text-zinc-100">
+                      {formatBRL(l.total)}
+                    </td>
+                    <td className="py-2.5 text-right num-tabular text-zinc-400">
+                      {l.pct.toFixed(0)}%
+                    </td>
+                  </tr>
+
+                  {expandida && l.detalhes && (
+                    <tr>
+                      <td colSpan={3} className="pt-1 pb-3">
+                        <div className="ml-4 rounded-xl border border-white/[0.06] bg-white/[0.02] overflow-hidden fade-in-up">
+                          {l.detalhes.map((d, i) => (
+                            <div
+                              key={d.label}
+                              className={`relative px-3.5 py-2.5 ${
+                                i > 0 ? 'border-t border-white/[0.04]' : ''
+                              }`}
+                            >
+                              <div className="flex items-center gap-3">
+                                <span className="w-5 h-5 rounded-full bg-white/[0.05] text-[10px] text-zinc-400 flex items-center justify-center shrink-0">
+                                  {i + 1}
+                                </span>
+                                <span className="text-zinc-300 text-[13px] truncate flex-1">
+                                  {d.label}
+                                </span>
+                                <span className="text-zinc-500 text-xs shrink-0">{d.count}×</span>
+                                <span className="text-zinc-100 text-[13px] num-tabular shrink-0">
+                                  {formatBRL(d.total)}
+                                </span>
+                              </div>
+                              <div
+                                className="absolute left-0 bottom-0 h-[2px] rounded-full transition-all"
+                                style={{
+                                  width: `${Math.max(6, (d.total / maxDetalhe) * 100)}%`,
+                                  background: l.cor,
+                                  opacity: 0.55,
+                                }}
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              );
+            })}
           </tbody>
         </table>
       )}

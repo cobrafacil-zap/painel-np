@@ -11,6 +11,7 @@ import { getInvestidoPorMes } from '@/lib/financeiro/investimentos-db';
  *   - total_investido (Reserva + Renda Passiva — entra como receita E gasto)
  *   - por_categoria: [{ category, total, count }]
  *   - por_forma: [{ forma, total, count }] (gastos por tipo de pagamento)
+ *   - top_por_categoria: { [category]: [{ description, total, count }] } (top 3)
  *   - evolucao_mensal: [{ mes: 'YYYY-MM', receitas, gastos }]
  */
 export async function GET(req: NextRequest) {
@@ -22,7 +23,7 @@ export async function GET(req: NextRequest) {
   const supabase = await createClient();
   let q = supabase
     .from('records')
-    .select('type, amount, category, payment_method, occurred_at')
+    .select('type, amount, category, payment_method, description, occurred_at')
     .eq('user_id', userId)
     .eq('module_id', 'financeiro');
 
@@ -37,6 +38,7 @@ export async function GET(req: NextRequest) {
   let total_gastos = 0;
   const porCategoria: Record<string, { category: string | null; total: number; count: number }> = {};
   const porForma: Record<string, { forma: string | null; total: number; count: number }> = {};
+  const descPorCategoria: Record<string, Record<string, { description: string; total: number; count: number }>> = {};
   const porMes: Record<string, { mes: string; receitas: number; gastos: number }> = {};
 
   for (const r of rows) {
@@ -50,6 +52,15 @@ export async function GET(req: NextRequest) {
       if (!porCategoria[keyCat]) porCategoria[keyCat] = { category: r.category ?? null, total: 0, count: 0 };
       porCategoria[keyCat].total += amt;
       porCategoria[keyCat].count += 1;
+
+      // "coisas" (descrições) mais caras dentro de cada categoria
+      const descLabel = (r.description ?? '').trim() || 'Sem descrição';
+      if (!descPorCategoria[keyCat]) descPorCategoria[keyCat] = {};
+      if (!descPorCategoria[keyCat][descLabel]) {
+        descPorCategoria[keyCat][descLabel] = { description: descLabel, total: 0, count: 0 };
+      }
+      descPorCategoria[keyCat][descLabel].total += amt;
+      descPorCategoria[keyCat][descLabel].count += 1;
 
       const keyForma = r.payment_method ?? '';
       if (!porForma[keyForma]) porForma[keyForma] = { forma: r.payment_method ?? null, total: 0, count: 0 };
@@ -68,6 +79,15 @@ export async function GET(req: NextRequest) {
 
   const por_categoria = Object.values(porCategoria).sort((a, b) => b.total - a.total);
   const por_forma = Object.values(porForma).sort((a, b) => b.total - a.total);
+  const top_por_categoria: Record<
+    string,
+    Array<{ description: string; total: number; count: number }>
+  > = {};
+  for (const [cat, descs] of Object.entries(descPorCategoria)) {
+    top_por_categoria[cat] = Object.values(descs)
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 3);
+  }
 
   // Investimento não é lançamento, mas conta como receita E gasto
   // (saldo não muda) — ver lib/financeiro/investimentos.ts.
@@ -95,6 +115,7 @@ export async function GET(req: NextRequest) {
     total_investido,
     por_categoria,
     por_forma,
+    top_por_categoria,
     evolucao_mensal,
   });
 }
