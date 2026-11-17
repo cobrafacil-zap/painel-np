@@ -194,7 +194,8 @@ export function InvestimentosView() {
             Nenhum aporte ainda. Use o formulário acima pra começar.
           </p>
         ) : (
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[560px] text-sm">
             <thead className="text-zinc-500">
               <tr className="text-left text-xs">
                 <th className="font-medium pb-2">Data</th>
@@ -261,6 +262,7 @@ export function InvestimentosView() {
               })}
             </tbody>
           </table>
+          </div>
         )}
 
         {toast && (

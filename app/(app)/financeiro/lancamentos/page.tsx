@@ -23,6 +23,7 @@ const EditLancamentoDrawer = dynamic(
 
 export default function LancamentosPage() {
   const [records, setRecords] = useState<FinanceRecord[]>([]);
+  const [catMap, setCatMap] = useState<Record<string, { label: string; color: string | null }>>({});
   const [loading, setLoading] = useState(true);
   const [refreshKey, setRefreshKey] = useState(0);
   const [pendingDelete, setPendingDelete] = useState<FinanceRecord | null>(null);
@@ -49,6 +50,26 @@ export default function LancamentosPage() {
         setLoading(false);
       });
   }, [refreshKey]);
+
+  // Categorias (slug → label/color) pra exibir a coluna Categoria bonitinha
+  useEffect(() => {
+    createClient()
+      .from('categories')
+      .select('slug, label, color')
+      .eq('module_id', 'financeiro')
+      .then(({ data }) => {
+        const map: Record<string, { label: string; color: string | null }> = {};
+        for (const c of data ?? []) map[c.slug] = { label: c.label, color: c.color };
+        setCatMap(map);
+      });
+  }, []);
+
+  function labelCategoria(slug: string): string {
+    return (
+      catMap[slug]?.label ??
+      slug.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase())
+    );
+  }
 
   function flash(msg: string) {
     setToast(msg);
@@ -82,8 +103,18 @@ export default function LancamentosPage() {
           { sensitivity: 'base' },
         );
       } else {
-        const va = (ordem.col === 'category' ? a.category : a.description) ?? '';
-        const vb = (ordem.col === 'category' ? b.category : b.description) ?? '';
+        const va =
+          (ordem.col === 'category'
+            ? a.category
+              ? labelCategoria(a.category)
+              : ''
+            : a.description) ?? '';
+        const vb =
+          (ordem.col === 'category'
+            ? b.category
+              ? labelCategoria(b.category)
+              : ''
+            : b.description) ?? '';
         cmp = va.localeCompare(vb, 'pt-BR', { sensitivity: 'base' });
       }
       if (cmp !== 0) return ordem.asc ? cmp : -cmp;
@@ -91,7 +122,7 @@ export default function LancamentosPage() {
       return (b.created_at ?? '').localeCompare(a.created_at ?? '');
     });
     return arr;
-  }, [records, ordem]);
+  }, [records, ordem, catMap]);
 
   async function confirmDelete() {
     if (!pendingDelete) return;
@@ -126,7 +157,8 @@ export default function LancamentosPage() {
         ) : records.length === 0 ? (
           <p className="p-6 text-sm text-zinc-500">Nenhum lançamento ainda. Use o botão acima ou mande no WhatsApp.</p>
         ) : (
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[680px] text-sm">
             <thead className="bg-bg-elevated text-zinc-400">
               <tr>
                 <ThOrdenavel col="occurred_at" label="Data" ordem={ordem} onClick={alternarOrdenacao} />
@@ -143,7 +175,19 @@ export default function LancamentosPage() {
                 <tr key={r.id} className="border-t border-border hover:bg-bg-elevated/50">
                   <td className="px-4 py-2.5 text-zinc-400 whitespace-nowrap">{formatDateBR(r.occurred_at)}</td>
                   <td className="px-4 py-2.5">{r.description ?? '—'}</td>
-                  <td className="px-4 py-2.5 text-zinc-400">{r.category ?? '—'}</td>
+                  <td className="px-4 py-2.5">
+                    {r.category ? (
+                      <span className="inline-flex items-center gap-2 text-zinc-300">
+                        <span
+                          className="w-2 h-2 rounded-full shrink-0"
+                          style={{ background: catMap[r.category]?.color ?? '#6b7280' }}
+                        />
+                        {labelCategoria(r.category)}
+                      </span>
+                    ) : (
+                      <span className="text-zinc-600">—</span>
+                    )}
+                  </td>
                   <td className="px-4 py-2.5 text-zinc-400">{labelForma(r.payment_method)}</td>
                   <td className={`px-4 py-2.5 text-right font-medium tabular-nums ${r.type === 'receita' ? 'text-emerald-300' : 'text-red-300'}`}>
                     {r.type === 'receita' ? '+' : '−'} {formatBRL(Number(r.amount))}
@@ -175,6 +219,7 @@ export default function LancamentosPage() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
 
         {toast && (
