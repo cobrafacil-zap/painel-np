@@ -25,6 +25,7 @@ begin
     (p_user_id, 'financeiro', 'posto',         'Posto',          'Fuel',          '#f97316', true),
     (p_user_id, 'financeiro', 'crediario',     'Crediário',      'CreditCard',    '#0ea5e9', true),
     (p_user_id, 'financeiro', 'cartao_credito','Cartão de crédito','CreditCard',  '#6366f1', true),
+    (p_user_id, 'financeiro', 'presentes',     'Presentes',      'Gift',          '#f43f5e', true),
     (p_user_id, 'financeiro', 'outros',        'Outros',         'Circle',        '#6b7280', true)
   on conflict (user_id, module_id, slug) do nothing;
 end $$;
@@ -35,7 +36,8 @@ select p.id, 'financeiro', v.slug, v.label, v.icon, v.color, true
 from public.profiles p
 cross join (values
   ('crediario',      'Crediário',        'CreditCard', '#0ea5e9'),
-  ('cartao_credito', 'Cartão de crédito','CreditCard', '#6366f1')
+  ('cartao_credito', 'Cartão de crédito','CreditCard', '#6366f1'),
+  ('presentes',      'Presentes',        'Gift',       '#f43f5e')
 ) as v(slug, label, icon, color)
 on conflict (user_id, module_id, slug) do nothing;
 

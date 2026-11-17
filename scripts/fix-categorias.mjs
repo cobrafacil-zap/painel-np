@@ -67,6 +67,7 @@ for (const user_id of userIds) {
     [
       { user_id, module_id: 'financeiro', slug: 'crediario', label: 'Crediário', icon: 'CreditCard', color: '#0ea5e9', is_system: true },
       { user_id, module_id: 'financeiro', slug: 'cartao_credito', label: 'Cartão de crédito', icon: 'CreditCard', color: '#6366f1', is_system: true },
+      { user_id, module_id: 'financeiro', slug: 'presentes', label: 'Presentes', icon: 'Gift', color: '#f43f5e', is_system: true },
     ],
     { onConflict: 'user_id,module_id,slug', ignoreDuplicates: true },
   );
@@ -74,7 +75,7 @@ for (const user_id of userIds) {
     console.error('❌ upsert categorias:', error.message);
     process.exit(1);
   }
-  criadas += 2;
+  criadas += 3;
 }
 console.log(`✅ 'Crediário' + 'Cartão de crédito' garantidas pra ${userIds.length} user(s) (${criadas} slots)`);
 console.log('\n--- Pronto ---');
