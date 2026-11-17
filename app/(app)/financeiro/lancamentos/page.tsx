@@ -1,12 +1,14 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { createClient } from '@/lib/supabase/client';
 import type { FinanceRecord } from '@/lib/types';
 import { LancamentoForm } from '../_components/lancamento-form';
 import { formatBRL, formatDateBR } from '@/lib/utils';
-import { Trash2, Pencil } from 'lucide-react';
+import { Trash2, Pencil, ChevronUp, ChevronDown } from 'lucide-react';
+
+type OrdemCol = 'occurred_at' | 'description' | 'category' | 'amount';
 
 // Lazy-load: drawer só baixa quando o usuário abre pra editar.
 // Evita inflar o bundle da list page com forms.
@@ -26,6 +28,11 @@ export default function LancamentosPage() {
   const [editing, setEditing] = useState<FinanceRecord | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  // Ordenação da tabela — clique no cabeçalho (padrão: data, mais recente primeiro)
+  const [ordem, setOrdem] = useState<{ col: OrdemCol; asc: boolean }>({
+    col: 'occurred_at',
+    asc: false,
+  });
 
   useEffect(() => {
     setLoading(true);
@@ -46,6 +53,35 @@ export default function LancamentosPage() {
     setToast(msg);
     setTimeout(() => setToast(null), 3000);
   }
+
+  function alternarOrdenacao(col: OrdemCol) {
+    setOrdem((o) =>
+      o.col === col
+        ? { col, asc: !o.asc }
+        : // Texto começa A→Z; data e valor começam do maior/recente
+          { col, asc: col === 'description' || col === 'category' },
+    );
+  }
+
+  const registrosOrdenados = useMemo(() => {
+    const arr = [...records];
+    arr.sort((a, b) => {
+      let cmp = 0;
+      if (ordem.col === 'amount') {
+        cmp = Number(a.amount) - Number(b.amount);
+      } else if (ordem.col === 'occurred_at') {
+        cmp = (a.occurred_at ?? '').localeCompare(b.occurred_at ?? '');
+      } else {
+        const va = (a[ordem.col] ?? '') as string;
+        const vb = (b[ordem.col] ?? '') as string;
+        cmp = va.localeCompare(vb, 'pt-BR', { sensitivity: 'base' });
+      }
+      if (cmp !== 0) return ordem.asc ? cmp : -cmp;
+      // Desempate: mais recente primeiro
+      return (b.created_at ?? '').localeCompare(a.created_at ?? '');
+    });
+    return arr;
+  }, [records, ordem]);
 
   async function confirmDelete() {
     if (!pendingDelete) return;
@@ -83,17 +119,17 @@ export default function LancamentosPage() {
           <table className="w-full text-sm">
             <thead className="bg-bg-elevated text-zinc-400">
               <tr>
-                <th className="text-left px-4 py-2.5 font-medium">Data</th>
-                <th className="text-left px-4 py-2.5 font-medium">Descrição</th>
-                <th className="text-left px-4 py-2.5 font-medium">Categoria</th>
+                <ThOrdenavel col="occurred_at" label="Data" ordem={ordem} onClick={alternarOrdenacao} />
+                <ThOrdenavel col="description" label="Descrição" ordem={ordem} onClick={alternarOrdenacao} />
+                <ThOrdenavel col="category" label="Categoria" ordem={ordem} onClick={alternarOrdenacao} />
                 <th className="text-left px-4 py-2.5 font-medium">Forma</th>
-                <th className="text-right px-4 py-2.5 font-medium">Valor</th>
+                <ThOrdenavel col="amount" label="Valor" ordem={ordem} onClick={alternarOrdenacao} align="right" />
                 <th className="text-right px-4 py-2.5 font-medium">Origem</th>
                 <th className="w-20"></th>
               </tr>
             </thead>
             <tbody>
-              {records.map((r) => (
+              {registrosOrdenados.map((r) => (
                 <tr key={r.id} className="border-t border-border hover:bg-bg-elevated/50">
                   <td className="px-4 py-2.5 text-zinc-400 whitespace-nowrap">{formatDateBR(r.occurred_at)}</td>
                   <td className="px-4 py-2.5">{r.description ?? '—'}</td>
@@ -190,5 +226,45 @@ export default function LancamentosPage() {
         }}
       />
     </div>
+  );
+}
+
+/** Cabeçalho de coluna ordenável — 1 clique ordena, 2º clique inverte. */
+function ThOrdenavel({
+  col,
+  label,
+  ordem,
+  onClick,
+  align = 'left',
+}: {
+  col: OrdemCol;
+  label: string;
+  ordem: { col: OrdemCol; asc: boolean };
+  onClick: (col: OrdemCol) => void;
+  align?: 'left' | 'right';
+}) {
+  const ativo = ordem.col === col;
+  return (
+    <th className={`px-4 py-2.5 font-medium ${align === 'right' ? 'text-right' : 'text-left'}`}>
+      <button
+        type="button"
+        onClick={() => onClick(col)}
+        className={`inline-flex items-center gap-1 hover:text-zinc-200 transition-colors ${
+          ativo ? 'text-zinc-200' : ''
+        } ${align === 'right' ? 'flex-row-reverse' : ''}`}
+        title={`Ordenar por ${label}`}
+      >
+        {label}
+        {ativo ? (
+          ordem.asc ? (
+            <ChevronUp className="w-3.5 h-3.5" />
+          ) : (
+            <ChevronDown className="w-3.5 h-3.5" />
+          )
+        ) : (
+          <ChevronUp className="w-3.5 h-3.5 opacity-30" />
+        )}
+      </button>
+    </th>
   );
 }
