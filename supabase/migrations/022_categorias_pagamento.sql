@@ -31,7 +31,7 @@ end $$;
 
 -- 2) Backfill pra usuários existentes
 insert into public.categories (user_id, module_id, slug, label, icon, color, is_system)
-select p.id, v.slug, v.label, v.icon, v.color, true
+select p.id, 'financeiro', v.slug, v.label, v.icon, v.color, true
 from public.profiles p
 cross join (values
   ('crediario',      'Crediário',        'CreditCard', '#0ea5e9'),
