@@ -14,7 +14,7 @@ import { useRouter } from 'next/navigation';
 export default function ReservaEmergenciaLegacyPage() {
   const router = useRouter();
   useEffect(() => {
-    router.replace('/financeiro/investimentos?tab=reserva');
+    router.replace('/financeiro/investimentos');
   }, [router]);
   return null;
 }

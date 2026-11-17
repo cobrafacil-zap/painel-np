@@ -13,7 +13,7 @@ import { useRouter } from 'next/navigation';
 export default function RendaPassivaLegacyPage() {
   const router = useRouter();
   useEffect(() => {
-    router.replace('/financeiro/investimentos?tab=renda-passiva');
+    router.replace('/financeiro/investimentos');
   }, [router]);
   return null;
 }

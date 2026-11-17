@@ -15,6 +15,18 @@ export interface DepositoInvestimento {
   occurred_at: string; // ISO do Supabase (timestamptz)
 }
 
+export type CategoriaInvestimento = 'reserva' | 'imobiliario' | 'acoes';
+
+export const CATEGORIAS_INVESTIMENTO: Array<{
+  value: CategoriaInvestimento;
+  label: string;
+  cor: string;
+}> = [
+  { value: 'reserva', label: 'Investimento Reserva', cor: '#22c55e' },
+  { value: 'imobiliario', label: 'Investimento Imobiliário', cor: '#3b82f6' },
+  { value: 'acoes', label: 'Investimento Ações', cor: '#f59e0b' },
+];
+
 /** Soma os depósitos de um período. */
 export function somarInvestido(depositos: DepositoInvestimento[]): number {
   return depositos.reduce((s, d) => s + Number(d.valor), 0);

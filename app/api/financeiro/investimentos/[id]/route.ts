@@ -1,12 +1,12 @@
 /**
- * DELETE /api/financeiro/reserva-emergencia/[id]
+ * DELETE /api/financeiro/investimentos/[id]
  *
- * Remove um depósito da reserva (delete físico).
+ * Remove um aporte de investimento (delete físico — correção manual).
  */
 
 import { NextResponse } from 'next/server';
 import { requireUser } from '@/lib/supabase/server';
-import { removerDeposito, somaDepositos } from '@/lib/financeiro/reserva-emergencia-db';
+import { removerDeposito } from '@/lib/financeiro/investimentos-db';
 
 export async function DELETE(
   _req: Request,
@@ -19,7 +19,5 @@ export async function DELETE(
   if (!ok) {
     return NextResponse.json({ error: 'delete_failed' }, { status: 500 });
   }
-
-  const novoTotal = await somaDepositos(userId);
-  return NextResponse.json({ ok: true, total_depositado: Math.round(novoTotal * 100) / 100 });
+  return NextResponse.json({ ok: true });
 }
